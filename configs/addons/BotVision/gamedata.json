@@ -1,0 +1,27 @@
+{
+  "CBotManager::IsVisibleThroughSmoke": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 8B DC 49 89 5B ? 49 89 6B ? 49 89 73 ? 49 89 7B ? 41 54 41 56 41 57 48 81 EC",
+      "linux": ""
+    }
+  },
+  "g_AutoList_SmokeProj_Head_Server": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 1D ? ? ? ? 48 8B EA 0F 29 74 24",
+      "linux": ""
+    },
+    "offset": 3,
+    "rel_size": 7,
+    "comment": "cs:g_AutoList_SmokeProj_Head_Server. offset=3: disp32 starts at sig+3; rel_size=7: full mov instruction length."
+  },
+  "GetSmokeDensityInLine": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 53 56 41 54 41 56",
+      "linux": ""
+    },
+    "comment": "smoke-density integrator."
+  }
+}
