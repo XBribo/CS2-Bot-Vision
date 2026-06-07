@@ -30,7 +30,7 @@ public:
     const char *GetDescription() override { return "Volumetric smoke bots."; }
     const char *GetURL() override { return ""; }
     const char *GetLicense() override { return "GPLv3"; }
-    const char *GetVersion() override { return "0.1.0"; }
+    const char *GetVersion() override { return "0.1.1"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BOTVISION"; }
 };
@@ -115,6 +115,8 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI *ismm,
     {
         return false;
     }
+
+    cs2bv::hooks::SetEngine(cs2bv::commands::g_pEngine);
 
     cs2bv::commands::Register();
     OutputDebugStringA("[BotVision] plugin loaded successfully\n");

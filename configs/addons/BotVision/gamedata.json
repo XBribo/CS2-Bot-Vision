@@ -23,5 +23,13 @@
       "linux": ""
     },
     "comment": "smoke-density integrator."
+  },
+  "CHEGrenadeProjectile::Detonate": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 55 41 55 48 8D 68 ? 48 81 EC ? ? ? ? 48 89 58",
+      "linux": ""
+    },
+    "comment": "HE detonate; fires hegrenade_detonate event. Hooked to record blast center for smoke holes. a1 = projectile this."
   }
 }

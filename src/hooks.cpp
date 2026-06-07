@@ -10,14 +10,41 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include <eiface.h> // IVEngineServer2::GetServerGlobals
+#include <edict.h>  // CGlobalVars (curtime)
+
+/* HE detonate hook */
+struct HeBlast
+{
+    float x, y, z;   // detonation center
+    float startTime; // curtime when recorded
+};
+
+static IVEngineServer2 *g_pEngine = nullptr;
+static std::mutex g_blastMutex;
+static std::vector<HeBlast> g_blasts;
+static std::atomic<int> g_heRadiusMilli{200000};         // bv_he_radius * 1000 (default 200)
+static std::atomic<int> g_heDurationMilli{3500};         // bv_he_duration * 1000 (default 3.5s)
+static std::string g_heListenerStatus = "not_attempted"; // hegrenade_detonate registration result
+
 using IsVisibleThroughSmoke_t = bool(__fastcall *)(void *self, const void *from, const void *to);
 
 using GetSmokeDensityInLine_t = float(__fastcall *)(const float *from, const float *to, float *outClosest);
+
+// CHEGrenadeProjectile::Detonate
+using HeDetonate_t = __int64(__fastcall *)(void *self);
+static HeDetonate_t g_origHeDetonate = nullptr;
+static const char *kHeDetonateName = "CHEGrenadeProjectile::Detonate";
+
+// CBaseEntity origin layout
+static const int kSceneNodeOffset = 624;
+static const int kAbsOriginOffset = 200;
 
 static IsVisibleThroughSmoke_t g_origIsVisibleThroughSmoke = nullptr;
 static GetSmokeDensityInLine_t g_fnGetSmokeDensityInLine = nullptr;
@@ -30,7 +57,76 @@ static std::atomic<int> g_densityThrMilli{200}; // bv_density_threshold * 1000 (
 
 static const char *kFuncName = "CBotManager::IsVisibleThroughSmoke";
 static const char *kHeadName = "g_AutoList_SmokeProj_Head_Server";
-static const char *kDensityFnName = "GetSmokeDensityInLine"; // sub_18093FC00
+static const char *kDensityFnName = "GetSmokeDensityInLine";
+
+// Current curtime
+static float NowTime()
+{
+    if (!g_pEngine)
+        return 0.0f;
+    CGlobalVars *gv = g_pEngine->GetServerGlobals();
+    return gv ? gv->curtime : 0.0f;
+}
+
+// Shortest squared distance from point p to segment a->b
+static float DistSqPointSeg(const float p[3], const float a[3], const float b[3])
+{
+    float ab[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    float ap[3] = {p[0] - a[0], p[1] - a[1], p[2] - a[2]};
+    float len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    float t = len2 > 0.0f ? (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2 : 0.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    else if (t > 1.0f)
+        t = 1.0f;
+    float c[3] = {a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t};
+    float d[3] = {p[0] - c[0], p[1] - c[1], p[2] - c[2]};
+    return d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+}
+
+/* True if the LOS segment passes through any active HE hole.
+   Hole radius shrinks linearly with age: r(age) = baseR * (1 - age/dur) */
+static bool SegmentClearedByHeHole(const float *from, const float *to)
+{
+    float dur = g_heDurationMilli.load(std::memory_order_relaxed) * 0.001f;
+    float baseR = g_heRadiusMilli.load(std::memory_order_relaxed) * 0.001f;
+    if (dur <= 0.0f || baseR <= 0.0f)
+        return false;
+    float now = NowTime();
+
+    std::lock_guard<std::mutex> lk(g_blastMutex);
+    bool cleared = false;
+    size_t w = 0;
+    for (size_t i = 0; i < g_blasts.size(); ++i)
+    {
+        float age = now - g_blasts[i].startTime;
+        if (age < 0.0f || age >= dur)
+            continue;
+        g_blasts[w++] = g_blasts[i];
+        float r = baseR * (1.0f - age / dur);
+        float center[3] = {g_blasts[i].x, g_blasts[i].y, g_blasts[i].z};
+        if (DistSqPointSeg(center, from, to) <= r * r)
+            cleared = true;
+    }
+    g_blasts.resize(w);
+    return cleared;
+}
+
+// CHEGrenadeProjectile::Detonate
+static __int64 __fastcall HookedHeDetonate(void *self)
+{
+    if (self)
+    {
+        auto entity = reinterpret_cast<uintptr_t>(self);
+        uintptr_t node = *reinterpret_cast<uintptr_t *>(entity + kSceneNodeOffset);
+        if (node)
+        {
+            const float *origin = reinterpret_cast<const float *>(node + kAbsOriginOffset);
+            cs2bv::hooks::OnHeDetonate(origin[0], origin[1], origin[2]);
+        }
+    }
+    return g_origHeDetonate(self);
+}
 
 static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from, const void *to)
 {
@@ -50,6 +146,8 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
     float thr = g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f;
     if (dens >= thr)
     {
+        if (SegmentClearedByHeHole(fa, fb))
+            return true;
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -210,6 +308,32 @@ namespace cs2bv::hooks
             }
         }
 
+        // Resolve + hook CHEGrenadeProjectile::Detonate
+        {
+            char heErr[256] = {0};
+            void *heTarget = cs2bv::sig::ResolveSig(gamedata, server, kHeDetonateName, heErr, sizeof(heErr));
+            if (heTarget &&
+                MH_CreateHook(heTarget, reinterpret_cast<void *>(&HookedHeDetonate),
+                              reinterpret_cast<void **>(&g_origHeDetonate)) == MH_OK &&
+                MH_EnableHook(heTarget) == MH_OK)
+            {
+                char hb[160];
+                std::snprintf(hb, sizeof(hb),
+                              "[BotVision] %s @ %p (HE holes active)\n", kHeDetonateName, heTarget);
+                OutputDebugStringA(hb);
+                g_heListenerStatus = "hook=ok";
+            }
+            else
+            {
+                char hb[320];
+                std::snprintf(hb, sizeof(hb),
+                              "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
+                              heTarget ? "MinHook error" : heErr);
+                OutputDebugStringA(hb);
+                g_heListenerStatus = heTarget ? "hook=FAIL" : "sig=FAIL";
+            }
+        }
+
         OutputDebugStringA("[BotVision] detour installed\n");
         return true;
     }
@@ -235,6 +359,42 @@ namespace cs2bv::hooks
     float GetDensityThreshold() { return g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f; }
     bool IsDensityFnResolved() { return g_fnGetSmokeDensityInLine != nullptr; }
 
+    void SetEngine(void *engine) { g_pEngine = static_cast<IVEngineServer2 *>(engine); }
+
+    // Record an HE detonation as a new active hole
+    void OnHeDetonate(float x, float y, float z)
+    {
+        float t = NowTime();
+        {
+            std::lock_guard<std::mutex> lk(g_blastMutex);
+            g_blasts.push_back({x, y, z, t});
+        }
+        char dbg[160];
+        std::snprintf(dbg, sizeof(dbg),
+                      "[BotVision] HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d\n",
+                      x, y, z, t, GetActiveBlastCount());
+        OutputDebugStringA(dbg);
+    }
+
+    void SetHeRadius(float v) { g_heRadiusMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetHeRadius() { return g_heRadiusMilli.load(std::memory_order_relaxed) * 0.001f; }
+    void SetHeDuration(float v) { g_heDurationMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetHeDuration() { return g_heDurationMilli.load(std::memory_order_relaxed) * 0.001f; }
+
+    int GetActiveBlastCount()
+    {
+        std::lock_guard<std::mutex> lk(g_blastMutex);
+        return (int)g_blasts.size();
+    }
+
+    void SetHeListenerStatus(bool managerResolved, bool listenerAdded)
+    {
+        g_heListenerStatus = managerResolved
+                                 ? (listenerAdded ? "mgr=ok,add=ok" : "mgr=ok,add=FAIL")
+                                 : "mgr=NULL";
+    }
+    const char *GetHeListenerStatus() { return g_heListenerStatus.c_str(); }
+
     int TestLos(float fx, float fy, float fz, float tx, float ty, float tz,
                 char *buf, size_t buflen)
     {
@@ -255,9 +415,13 @@ namespace cs2bv::hooks
 
         float dens = g_fnGetSmokeDensityInLine(from, to, nullptr);
         float thr = g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f;
+        bool engineBlock = dens >= thr;
+        bool heCleared = SegmentClearedByHeHole(from, to);
+        bool finalBlock = engineBlock && !heCleared;
         written += std::snprintf(buf + written, buflen - written,
-                                 "density=%.4f  threshold=%.4f  blocked=%d\n",
-                                 dens, thr, dens >= thr ? 1 : 0);
+                                 "density=%.4f  threshold=%.4f  engineBlock=%d  heCleared=%d  blocked=%d  activeHoles=%d\n",
+                                 dens, thr, engineBlock ? 1 : 0, heCleared ? 1 : 0,
+                                 finalBlock ? 1 : 0, GetActiveBlastCount());
         return written;
     }
 

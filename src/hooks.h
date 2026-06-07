@@ -9,6 +9,19 @@ namespace cs2bv::hooks
                  void *serverInterface,
                  char *error = nullptr, size_t maxlen = 0);
     void Remove();
+
+    // HE smoke-hole support
+    void SetEngine(void *engine);
+    void OnHeDetonate(float x, float y, float z);
+    void SetHeRadius(float v);
+    float GetHeRadius();
+    void SetHeDuration(float v);
+    float GetHeDuration();
+    int GetActiveBlastCount();
+
+    // HE event-hook registration status
+    void SetHeListenerStatus(bool managerResolved, bool listenerAdded);
+    const char *GetHeListenerStatus();
     long long GetHitCount();
     long long GetBlockedCount();
     bool IsHookedActive();

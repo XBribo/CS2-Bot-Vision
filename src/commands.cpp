@@ -44,10 +44,12 @@ CON_COMMAND_F(bv_status,
               FCVAR_NONE)
 {
     cs2bv::commands::PrintToCaller(context,
-                                     "[BotVision] hits=%lld blocked=%lld hooked=%s\n",
-                                     static_cast<long long>(cs2bv::hooks::GetHitCount()),
-                                     static_cast<long long>(cs2bv::hooks::GetBlockedCount()),
-                                     cs2bv::hooks::GetHookedStatus());
+                                   "[BotVision] hits=%lld blocked=%lld hooked=%s heHoles=%d heEvent=%s\n",
+                                   static_cast<long long>(cs2bv::hooks::GetHitCount()),
+                                   static_cast<long long>(cs2bv::hooks::GetBlockedCount()),
+                                   cs2bv::hooks::GetHookedStatus(),
+                                   cs2bv::hooks::GetActiveBlastCount(),
+                                   cs2bv::hooks::GetHeListenerStatus());
 }
 
 CON_COMMAND_F(bv_test_los,
@@ -57,7 +59,7 @@ CON_COMMAND_F(bv_test_los,
     if (args.ArgC() < 7)
     {
         cs2bv::commands::PrintToCaller(context,
-                                         "usage: bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>\n");
+                                       "usage: bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>\n");
         return;
     }
     float fx = (float)std::atof(args.Arg(1));
@@ -78,11 +80,11 @@ CON_COMMAND_F(bv_smoke_mode,
     if (args.ArgC() < 2)
     {
         cs2bv::commands::PrintToCaller(context,
-                                         "current mode=%d  densThr=%.3f  densityFn=%s\n"
-                                         "  (0=volume-smoke 1=ball-smoke)\n",
-                                         cs2bv::hooks::GetSmokeMode(),
-                                         cs2bv::hooks::GetDensityThreshold(),
-                                         cs2bv::hooks::IsDensityFnResolved() ? "resolved" : "MISSING(mode0->ball-smoke)");
+                                       "current mode=%d  densThr=%.3f  densityFn=%s\n"
+                                       "  (0=volume-smoke 1=ball-smoke)\n",
+                                       cs2bv::hooks::GetSmokeMode(),
+                                       cs2bv::hooks::GetDensityThreshold(),
+                                       cs2bv::hooks::IsDensityFnResolved() ? "resolved" : "MISSING(mode0->ball-smoke)");
         return;
     }
     int m = std::atoi(args.Arg(1));
@@ -99,8 +101,8 @@ CON_COMMAND_F(bv_density_threshold,
     if (args.ArgC() < 2)
     {
         cs2bv::commands::PrintToCaller(context,
-                                         "current density threshold = %.3f\n",
-                                         cs2bv::hooks::GetDensityThreshold());
+                                       "current density threshold = %.3f\n",
+                                       cs2bv::hooks::GetDensityThreshold());
         return;
     }
     float v = (float)std::atof(args.Arg(1));
@@ -108,5 +110,41 @@ CON_COMMAND_F(bv_density_threshold,
         v = 0.0f;
     cs2bv::hooks::SetDensityThreshold(v);
     cs2bv::commands::PrintToCaller(context, "density threshold set to %.3f\n",
-                                     cs2bv::hooks::GetDensityThreshold());
+                                   cs2bv::hooks::GetDensityThreshold());
+}
+
+CON_COMMAND_F(bv_he_radius,
+              "bv_he_radius <r>  HE smoke-hole radius in units (default 200).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current HE hole radius = %.1f\n",
+                                       cs2bv::hooks::GetHeRadius());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetHeRadius(v);
+    cs2bv::commands::PrintToCaller(context, "HE hole radius set to %.1f\n",
+                                   cs2bv::hooks::GetHeRadius());
+}
+
+CON_COMMAND_F(bv_he_duration,
+              "bv_he_duration <s>  HE smoke-hole lifetime in seconds (default 3.5).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current HE hole duration = %.2f\n",
+                                       cs2bv::hooks::GetHeDuration());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetHeDuration(v);
+    cs2bv::commands::PrintToCaller(context, "HE hole duration set to %.2f\n",
+                                   cs2bv::hooks::GetHeDuration());
 }
