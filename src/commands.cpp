@@ -50,6 +50,14 @@ CON_COMMAND_F(bv_status,
                                    cs2bv::hooks::GetHookedStatus(),
                                    cs2bv::hooks::GetActiveBlastCount(),
                                    cs2bv::hooks::GetHeListenerStatus());
+    cs2bv::commands::PrintToCaller(context,
+                                   "[BotVision] bullets=%lld holes=%d last: %s\n",
+                                   static_cast<long long>(cs2bv::hooks::GetBulletCount()),
+                                   cs2bv::hooks::GetActiveBulletHoleCount(),
+                                   cs2bv::hooks::GetLastBulletInfo());
+    cs2bv::commands::PrintToCaller(context,
+                                   "[BotVision] bulletDiag: %s\n",
+                                   cs2bv::hooks::GetBulletDiag());
 }
 
 CON_COMMAND_F(bv_test_los,
@@ -147,4 +155,73 @@ CON_COMMAND_F(bv_he_duration,
     cs2bv::hooks::SetHeDuration(v);
     cs2bv::commands::PrintToCaller(context, "HE hole duration set to %.2f\n",
                                    cs2bv::hooks::GetHeDuration());
+}
+
+CON_COMMAND_F(bv_bullet_radius,
+              "bv_bullet_radius <r>  bullet capsule-hole radius in units (default 12).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current bullet hole radius = %.1f\n",
+                                       cs2bv::hooks::GetBulletRadius());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetBulletRadius(v);
+    cs2bv::commands::PrintToCaller(context, "bullet hole radius set to %.1f\n",
+                                   cs2bv::hooks::GetBulletRadius());
+}
+
+CON_COMMAND_F(bv_bullet_duration,
+              "bv_bullet_duration <s>  bullet hole lifetime in seconds (default 0.2).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current bullet hole duration = %.2f\n",
+                                       cs2bv::hooks::GetBulletDuration());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetBulletDuration(v);
+    cs2bv::commands::PrintToCaller(context, "bullet hole duration set to %.2f\n",
+                                   cs2bv::hooks::GetBulletDuration());
+}
+
+CON_COMMAND_F(bv_bullet_range,
+              "bv_bullet_range <r>  max bullet path length in units (default 8192).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current bullet range = %.1f\n",
+                                       cs2bv::hooks::GetBulletRange());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetBulletRange(v);
+    cs2bv::commands::PrintToCaller(context, "bullet range set to %.1f\n",
+                                   cs2bv::hooks::GetBulletRange());
+}
+
+CON_COMMAND_F(bv_bullet_holes,
+              "bv_bullet_holes <0|1>  enable bullet smoke-holes (default 1).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "bullet holes = %d\n",
+                                       cs2bv::hooks::GetBulletHolesEnabled() ? 1 : 0);
+        return;
+    }
+    bool e = std::atoi(args.Arg(1)) != 0;
+    cs2bv::hooks::SetBulletHolesEnabled(e);
+    cs2bv::commands::PrintToCaller(context, "bullet holes set to %d\n", e ? 1 : 0);
 }

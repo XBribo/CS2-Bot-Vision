@@ -1,5 +1,6 @@
 #include "hooks.h"
 #include "sig_scan.h"
+#include "raytrace_iface.h"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -26,11 +27,29 @@ struct HeBlast
     float startTime; // curtime when recorded
 };
 
+/* Per-pellet bullet hole*/
+struct BulletHole
+{
+    float start[3];
+    float end[3];
+    float startTime; // curtime when recorded
+};
+
+static const size_t kMaxBulletHoles = 64; // ring cap; LOS query bounded by this
+
 static IVEngineServer2 *g_pEngine = nullptr;
+static cs2bv::rt::CRayTraceInterface *g_pRayTrace = nullptr; // bullet wall-clip
+static int g_rtRet = -999;
 static std::mutex g_blastMutex;
 static std::vector<HeBlast> g_blasts;
+static std::mutex g_bulletHoleMutex;
+static std::vector<BulletHole> g_bulletHoles;
 static std::atomic<int> g_heRadiusMilli{200000};         // bv_he_radius * 1000 (default 200)
-static std::atomic<int> g_heDurationMilli{3500};         // bv_he_duration * 1000 (default 3.5s)
+static std::atomic<int> g_heDurationMilli{3050};         // bv_he_duration * 1000 (default 3.05s)
+static std::atomic<int> g_bulletRadiusMilli{12000};      // bv_bullet_radius * 1000 (default 12)
+static std::atomic<int> g_bulletDurationMilli{200};      // bv_bullet_duration * 1000 (default 0.2s)
+static std::atomic<int> g_bulletRangeMilli{8192000};     // bv_bullet_range * 1000 (default 8192)
+static std::atomic<int> g_bulletHolesEnabled{1};         // bv_bullet_holes (default on)
 static std::string g_heListenerStatus = "not_attempted"; // hegrenade_detonate registration result
 
 using IsVisibleThroughSmoke_t = bool(__fastcall *)(void *self, const void *from, const void *to);
@@ -45,6 +64,24 @@ static const char *kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 // CBaseEntity origin layout
 static const int kSceneNodeOffset = 624;
 static const int kAbsOriginOffset = 200;
+
+// Per-pellet bullet trace
+using PelletTrace_t = __int64(__fastcall *)(
+    __int64 a1, void *a2, __int64 a3, float a4, float a5, int a6, unsigned char a7,
+    int a8, int a9, float a10, __int64 a11, int *a12, float a13, float a14,
+    __int64 a15, __int64 a16, int a17, int a18, void *a19, __int64 a20);
+static PelletTrace_t g_origPelletTrace = nullptr;
+static const char *kPelletTraceName = "BulletPelletTrace";
+
+// Verification state
+static std::atomic<long long> g_bulletCount{0};
+static std::mutex g_bulletMutex;
+static float g_lastBulletSrc[3] = {0, 0, 0};
+static float g_lastBulletAng[3] = {0, 0, 0};
+static float g_lastBulletFwd[3] = {0, 0, 0};
+
+static std::atomic<long long> g_traceAttempts{0}; // times we entered the trace branch
+static std::atomic<long long> g_traceHits{0};     // times TraceEndShape returned true
 
 static IsVisibleThroughSmoke_t g_origIsVisibleThroughSmoke = nullptr;
 static GetSmokeDensityInLine_t g_fnGetSmokeDensityInLine = nullptr;
@@ -84,7 +121,7 @@ static float DistSqPointSeg(const float p[3], const float a[3], const float b[3]
     return d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
 }
 
-/* True if the LOS segment passes through any active HE hole.
+/* True if the LOS segment passes through any active HE hole
    Hole radius shrinks linearly with age: r(age) = baseR * (1 - age/dur) */
 static bool SegmentClearedByHeHole(const float *from, const float *to)
 {
@@ -110,6 +147,161 @@ static bool SegmentClearedByHeHole(const float *from, const float *to)
     }
     g_blasts.resize(w);
     return cleared;
+}
+
+// Shortest squared distance between segment p1->q1 and segment p2->q2
+static float DistSqSegSeg(const float p1[3], const float q1[3],
+                          const float p2[3], const float q2[3])
+{
+    float d1[3] = {q1[0] - p1[0], q1[1] - p1[1], q1[2] - p1[2]};
+    float d2[3] = {q2[0] - p2[0], q2[1] - p2[1], q2[2] - p2[2]};
+    float r[3] = {p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]};
+    float a = d1[0] * d1[0] + d1[1] * d1[1] + d1[2] * d1[2];
+    float e = d2[0] * d2[0] + d2[1] * d2[1] + d2[2] * d2[2];
+    float f = d2[0] * r[0] + d2[1] * r[1] + d2[2] * r[2];
+    float s, t;
+    const float kEps = 1e-8f;
+    if (a <= kEps && e <= kEps)
+    {
+        s = t = 0.0f;
+    }
+    else if (a <= kEps)
+    {
+        s = 0.0f;
+        t = f / e;
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    }
+    else
+    {
+        float c = d1[0] * r[0] + d1[1] * r[1] + d1[2] * r[2];
+        if (e <= kEps)
+        {
+            t = 0.0f;
+            s = -c / a;
+            s = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s);
+        }
+        else
+        {
+            float b = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+            float denom = a * e - b * b;
+            s = denom > kEps ? (b * f - c * e) / denom : 0.0f;
+            s = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s);
+            t = (b * s + f) / e;
+            if (t < 0.0f)
+            {
+                t = 0.0f;
+                s = -c / a;
+                s = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s);
+            }
+            else if (t > 1.0f)
+            {
+                t = 1.0f;
+                s = (b - c) / a;
+                s = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s);
+            }
+        }
+    }
+    float c1[3] = {p1[0] + d1[0] * s, p1[1] + d1[1] * s, p1[2] + d1[2] * s};
+    float c2[3] = {p2[0] + d2[0] * t, p2[1] + d2[1] * t, p2[2] + d2[2] * t};
+    float dv[3] = {c1[0] - c2[0], c1[1] - c2[1], c1[2] - c2[2]};
+    return dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2];
+}
+
+// True if the bot eye lies inside any active bullet tunnel
+static bool SegmentClearedByBulletHole(const float *from, const float * /*to*/)
+{
+    float dur = g_bulletDurationMilli.load(std::memory_order_relaxed) * 0.001f;
+    float r = g_bulletRadiusMilli.load(std::memory_order_relaxed) * 0.001f;
+    if (dur <= 0.0f || r <= 0.0f)
+        return false;
+    float now = NowTime();
+
+    std::lock_guard<std::mutex> lk(g_bulletHoleMutex);
+    bool cleared = false;
+    size_t w = 0;
+    for (size_t i = 0; i < g_bulletHoles.size(); ++i)
+    {
+        float age = now - g_bulletHoles[i].startTime;
+        if (age < 0.0f || age >= dur)
+            continue;
+        g_bulletHoles[w++] = g_bulletHoles[i];
+        if (DistSqPointSeg(from, g_bulletHoles[i].start, g_bulletHoles[i].end) <= r * r)
+            cleared = true;
+    }
+    g_bulletHoles.resize(w);
+    return cleared;
+}
+
+// Per-pellet trace
+static __int64 __fastcall HookedPelletTrace(
+    __int64 a1, void *a2, __int64 a3, float a4, float a5, int a6, unsigned char a7,
+    int a8, int a9, float a10, __int64 a11, int *a12, float a13, float a14,
+    __int64 a15, __int64 a16, int a17, int a18, void *a19, __int64 a20)
+{
+    g_bulletCount.fetch_add(1, std::memory_order_relaxed);
+    if (a2 && a3)
+    {
+        const float *src = reinterpret_cast<const float *>(a2);
+        const float *ang = reinterpret_cast<const float *>(a3); // QAngle{pitch,yaw,roll}
+        // AngleVectors(ang) → fwd/right/up
+        float pitch = ang[0] * 0.01745329252f, yaw = ang[1] * 0.01745329252f, roll = ang[2] * 0.01745329252f;
+        float sp = std::sin(pitch), cp = std::cos(pitch);
+        float sy = std::sin(yaw), cy = std::cos(yaw);
+        float sr = std::sin(roll), cr = std::cos(roll);
+        float fwd[3] = {cp * cy, cp * sy, -sp};
+        float right[3] = {-1.f * sr * sp * cy + -1.f * cr * -sy,
+                          -1.f * sr * sp * sy + -1.f * cr * cy,
+                          -1.f * sr * cp};
+        float up[3] = {cr * sp * cy + -sr * -sy, cr * sp * sy + -sr * cy, cr * cp};
+        // pellet direction: dir = fwd - right*a13 + up*a14
+        float dir[3] = {fwd[0] - right[0] * a13 + up[0] * a14,
+                        fwd[1] - right[1] * a13 + up[1] * a14,
+                        fwd[2] - right[2] * a13 + up[2] * a14};
+
+        {
+            std::lock_guard<std::mutex> lk(g_bulletMutex);
+            for (int i = 0; i < 3; ++i)
+            {
+                g_lastBulletSrc[i] = src[i];
+                g_lastBulletAng[i] = ang[i];
+                g_lastBulletFwd[i] = dir[i];
+            }
+        }
+
+        // Register a capsule hole
+        bool smokePresent = g_pAutoListHead && *g_pAutoListHead;
+        if (g_bulletHolesEnabled.load(std::memory_order_relaxed) && g_pRayTrace && smokePresent)
+        {
+            g_traceAttempts.fetch_add(1, std::memory_order_relaxed);
+            float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+            if (len > 1e-4f)
+            {
+                float range = g_bulletRangeMilli.load(std::memory_order_relaxed) * 0.001f;
+                float inv = range / len;
+                cs2bv::rt::Vector start{src[0], src[1], src[2]};
+                cs2bv::rt::Vector end{src[0] + dir[0] * inv, src[1] + dir[1] * inv, src[2] + dir[2] * inv};
+                // ignore the shooter pawn (*(a1+56)) so the trace doesn't hit our own body
+                void *shooter = nullptr;
+                if (a1)
+                    shooter = *reinterpret_cast<void **>(a1 + 56);
+                cs2bv::rt::TraceOptions opts; // default InteractsWith = MASK_SHOT_PHYSICS
+                cs2bv::rt::TraceResult res;
+                if (g_pRayTrace->TraceEndShape(&start, &end, shooter, &opts, &res))
+                {
+                    g_traceHits.fetch_add(1, std::memory_order_relaxed);
+                    float endp[3] = {res.EndPos.x, res.EndPos.y, res.EndPos.z};
+                    cs2bv::hooks::OnBulletHole(src, endp);
+                }
+                else
+                {
+                    float endp[3] = {end.x, end.y, end.z}; // no hit → full range
+                    cs2bv::hooks::OnBulletHole(src, endp);
+                }
+            }
+        }
+    }
+    return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                             a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
 }
 
 // CHEGrenadeProjectile::Detonate
@@ -147,6 +339,8 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
     if (dens >= thr)
     {
         if (SegmentClearedByHeHole(fa, fb))
+            return true;
+        if (SegmentClearedByBulletHole(fa, fb))
             return true;
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -334,6 +528,30 @@ namespace cs2bv::hooks
             }
         }
 
+        // Resolve + hook per-pellet bullet trace (records bullet paths; shotgun = N pellets)
+        {
+            char fbErr[256] = {0};
+            void *fbTarget = cs2bv::sig::ResolveSig(gamedata, server, kPelletTraceName, fbErr, sizeof(fbErr));
+            if (fbTarget &&
+                MH_CreateHook(fbTarget, reinterpret_cast<void *>(&HookedPelletTrace),
+                              reinterpret_cast<void **>(&g_origPelletTrace)) == MH_OK &&
+                MH_EnableHook(fbTarget) == MH_OK)
+            {
+                char fb[160];
+                std::snprintf(fb, sizeof(fb),
+                              "[BotVision] %s @ %p (bullet capture active)\n", kPelletTraceName, fbTarget);
+                OutputDebugStringA(fb);
+            }
+            else
+            {
+                char fb[320];
+                std::snprintf(fb, sizeof(fb),
+                              "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
+                              fbTarget ? "MinHook error" : fbErr);
+                OutputDebugStringA(fb);
+            }
+        }
+
         OutputDebugStringA("[BotVision] detour installed\n");
         return true;
     }
@@ -361,6 +579,13 @@ namespace cs2bv::hooks
 
     void SetEngine(void *engine) { g_pEngine = static_cast<IVEngineServer2 *>(engine); }
 
+    void SetRayTrace(void *rt, int ret)
+    {
+        g_pRayTrace = static_cast<cs2bv::rt::CRayTraceInterface *>(rt);
+        g_rtRet = ret;
+    }
+    bool RayTraceReady() { return g_pRayTrace != nullptr; }
+
     // Record an HE detonation as a new active hole
     void OnHeDetonate(float x, float y, float z)
     {
@@ -381,6 +606,53 @@ namespace cs2bv::hooks
     void SetHeDuration(float v) { g_heDurationMilli.store((int)(v * 1000), std::memory_order_relaxed); }
     float GetHeDuration() { return g_heDurationMilli.load(std::memory_order_relaxed) * 0.001f; }
 
+    // Record a bullet capsule hole
+    void OnBulletHole(const float start[3], const float end[3])
+    {
+        float t = NowTime();
+        std::lock_guard<std::mutex> lk(g_bulletHoleMutex);
+        if (g_bulletHoles.size() < kMaxBulletHoles)
+        {
+            BulletHole h;
+            for (int i = 0; i < 3; ++i)
+            {
+                h.start[i] = start[i];
+                h.end[i] = end[i];
+            }
+            h.startTime = t;
+            g_bulletHoles.push_back(h);
+        }
+        else
+        {
+            // find oldest and replace
+            size_t oldest = 0;
+            for (size_t i = 1; i < g_bulletHoles.size(); ++i)
+                if (g_bulletHoles[i].startTime < g_bulletHoles[oldest].startTime)
+                    oldest = i;
+            for (int i = 0; i < 3; ++i)
+            {
+                g_bulletHoles[oldest].start[i] = start[i];
+                g_bulletHoles[oldest].end[i] = end[i];
+            }
+            g_bulletHoles[oldest].startTime = t;
+        }
+    }
+
+    void SetBulletRadius(float v) { g_bulletRadiusMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetBulletRadius() { return g_bulletRadiusMilli.load(std::memory_order_relaxed) * 0.001f; }
+    void SetBulletDuration(float v) { g_bulletDurationMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetBulletDuration() { return g_bulletDurationMilli.load(std::memory_order_relaxed) * 0.001f; }
+    void SetBulletRange(float v) { g_bulletRangeMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetBulletRange() { return g_bulletRangeMilli.load(std::memory_order_relaxed) * 0.001f; }
+    void SetBulletHolesEnabled(bool e) { g_bulletHolesEnabled.store(e ? 1 : 0, std::memory_order_relaxed); }
+    bool GetBulletHolesEnabled() { return g_bulletHolesEnabled.load(std::memory_order_relaxed) != 0; }
+
+    int GetActiveBulletHoleCount()
+    {
+        std::lock_guard<std::mutex> lk(g_bulletHoleMutex);
+        return (int)g_bulletHoles.size();
+    }
+
     int GetActiveBlastCount()
     {
         std::lock_guard<std::mutex> lk(g_blastMutex);
@@ -394,6 +666,35 @@ namespace cs2bv::hooks
                                  : "mgr=NULL";
     }
     const char *GetHeListenerStatus() { return g_heListenerStatus.c_str(); }
+
+    long long GetBulletCount() { return g_bulletCount.load(std::memory_order_relaxed); }
+
+    const char *GetLastBulletInfo()
+    {
+        static char buf[160];
+        std::lock_guard<std::mutex> lk(g_bulletMutex);
+        std::snprintf(buf, sizeof(buf),
+                      "src=(%.1f,%.1f,%.1f) ang=(%.1f,%.1f,%.1f) fwd=(%.2f,%.2f,%.2f)",
+                      g_lastBulletSrc[0], g_lastBulletSrc[1], g_lastBulletSrc[2],
+                      g_lastBulletAng[0], g_lastBulletAng[1], g_lastBulletAng[2],
+                      g_lastBulletFwd[0], g_lastBulletFwd[1], g_lastBulletFwd[2]);
+        return buf;
+    }
+
+    // Diagnostics
+    const char *GetBulletDiag()
+    {
+        static char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "rt=%s ret=%d enabled=%d autolist=%s attempts=%lld traceHits=%lld",
+                      g_pRayTrace ? "OK" : "NULL",
+                      g_rtRet,
+                      g_bulletHolesEnabled.load(std::memory_order_relaxed),
+                      g_pAutoListHead ? "set" : "NULL",
+                      static_cast<long long>(g_traceAttempts.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_traceHits.load(std::memory_order_relaxed)));
+        return buf;
+    }
 
     int TestLos(float fx, float fy, float fz, float tx, float ty, float tz,
                 char *buf, size_t buflen)
@@ -417,10 +718,11 @@ namespace cs2bv::hooks
         float thr = g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f;
         bool engineBlock = dens >= thr;
         bool heCleared = SegmentClearedByHeHole(from, to);
-        bool finalBlock = engineBlock && !heCleared;
+        bool bulletCleared = SegmentClearedByBulletHole(from, to);
+        bool finalBlock = engineBlock && !heCleared && !bulletCleared;
         written += std::snprintf(buf + written, buflen - written,
-                                 "density=%.4f  threshold=%.4f  engineBlock=%d  heCleared=%d  blocked=%d  activeHoles=%d\n",
-                                 dens, thr, engineBlock ? 1 : 0, heCleared ? 1 : 0,
+                                 "density=%.4f  threshold=%.4f  engineBlock=%d  heCleared=%d  bulletCleared=%d  blocked=%d  activeHoles=%d\n",
+                                 dens, thr, engineBlock ? 1 : 0, heCleared ? 1 : 0, bulletCleared ? 1 : 0,
                                  finalBlock ? 1 : 0, GetActiveBlastCount());
         return written;
     }

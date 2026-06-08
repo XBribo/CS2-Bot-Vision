@@ -14,6 +14,7 @@
 
 #include "hooks.h"
 #include "commands.h"
+#include "raytrace_iface.h"
 
 class BotVisionPlugin : public ISmmPlugin
 {
@@ -23,14 +24,17 @@ public:
 
     bool Pause(char * /*error*/, size_t /*maxlen*/) override { return true; }
     bool Unpause(char * /*error*/, size_t /*maxlen*/) override { return true; }
-    void AllPluginsLoaded() override {}
+    void AllPluginsLoaded() override;
+
+    void TryFetchRayTrace(); // resolve CRayTraceInterface
+    ISmmAPI *m_ismm = nullptr;
 
     const char *GetAuthor() override { return "CS2-Bot-Vision"; }
     const char *GetName() override { return "BotVision"; }
     const char *GetDescription() override { return "Volumetric smoke bots."; }
     const char *GetURL() override { return ""; }
     const char *GetLicense() override { return "GPLv3"; }
-    const char *GetVersion() override { return "0.1.1"; }
+    const char *GetVersion() override { return "0.1.2"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BOTVISION"; }
 };
@@ -118,9 +122,33 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI *ismm,
 
     cs2bv::hooks::SetEngine(cs2bv::commands::g_pEngine);
 
+    // Fetch the Ray-Trace interface
+    m_ismm = ismm;
+    TryFetchRayTrace();
+
     cs2bv::commands::Register();
     OutputDebugStringA("[BotVision] plugin loaded successfully\n");
     return true;
+}
+
+void BotVisionPlugin::TryFetchRayTrace()
+{
+    if (!m_ismm)
+        return;
+    int rtRet = 0;
+    void *rtIface = m_ismm->MetaFactory(RAYTRACE_INTERFACE_VERSION, &rtRet, nullptr);
+    cs2bv::hooks::SetRayTrace(rtIface, rtRet);
+    char rb[160];
+    std::snprintf(rb, sizeof(rb), rtIface ? "[BotVision] RayTrace %s @ %p (bullet wall-clip active)\n" : "[BotVision] WARN: RayTrace %s unavailable (ret=%d); bullet holes disabled\n",
+                  RAYTRACE_INTERFACE_VERSION, rtIface ? (void *)rtIface : (void *)(intptr_t)rtRet);
+    OutputDebugStringA(rb);
+}
+
+void BotVisionPlugin::AllPluginsLoaded()
+{
+    // Retry once everyone is up
+    if (!cs2bv::hooks::RayTraceReady())
+        TryFetchRayTrace();
 }
 
 bool BotVisionPlugin::Unload(char * /*error*/, size_t /*maxlen*/)

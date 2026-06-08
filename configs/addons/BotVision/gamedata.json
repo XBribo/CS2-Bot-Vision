@@ -31,5 +31,13 @@
       "linux": ""
     },
     "comment": "HE detonate; fires hegrenade_detonate event. Hooked to record blast center for smoke holes. a1 = projectile this."
+  },
+  "BulletPelletTrace": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 54 24 ? 55 56 41 57",
+      "linux": ""
+    },
+    "comment": "Per-pellet bullet trace (sub_1809EE860). Called once per pellet (shotgun=N). a2=start Vector*, a3=base QAngle*, a4=range, a13/a14=pellet spread X/Y. Hooked to record bullet path for smoke holes."
   }
 }

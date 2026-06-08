@@ -12,6 +12,8 @@ namespace cs2bv::hooks
 
     // HE smoke-hole support
     void SetEngine(void *engine);
+    void SetRayTrace(void *rayTraceInterface, int ret); // CRayTraceInterface*
+    bool RayTraceReady();
     void OnHeDetonate(float x, float y, float z);
     void SetHeRadius(float v);
     float GetHeRadius();
@@ -22,6 +24,23 @@ namespace cs2bv::hooks
     // HE event-hook registration status
     void SetHeListenerStatus(bool managerResolved, bool listenerAdded);
     const char *GetHeListenerStatus();
+
+    // Bullet smoke-hole support
+    void OnBulletHole(const float start[3], const float end[3]);
+    void SetBulletRadius(float v);
+    float GetBulletRadius();
+    void SetBulletDuration(float v);
+    float GetBulletDuration();
+    void SetBulletRange(float v);
+    float GetBulletRange();
+    void SetBulletHolesEnabled(bool e);
+    bool GetBulletHolesEnabled();
+    int GetActiveBulletHoleCount();
+    const char *GetBulletDiag();
+
+    // Bullet
+    long long GetBulletCount();
+    const char *GetLastBulletInfo();
     long long GetHitCount();
     long long GetBlockedCount();
     bool IsHookedActive();
