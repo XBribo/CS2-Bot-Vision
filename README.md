@@ -1,6 +1,6 @@
 # BotVision
 
-**Make CS2 bots respect volumetric smoke — a Metamod:Source plugin**
+**Make Bot Vision Great Again**
 
 ## Your stars⭐ are my motivation to keep updating
 
