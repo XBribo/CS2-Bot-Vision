@@ -1,11 +1,13 @@
 #include "hooks.h"
 #include "sig_scan.h"
 #include "raytrace_iface.h"
+#include "cdetour.h"
 
 #include <Windows.h>
-#include <MinHook.h>
+#include <funchook.h>
 
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
@@ -33,6 +35,7 @@ struct BulletHole
     float start[3];
     float end[3];
     float startTime; // curtime when recorded
+    float radius;    // per-hole radius
 };
 
 static const size_t kMaxBulletHoles = 64; // ring cap; LOS query bounded by this
@@ -44,13 +47,14 @@ static std::mutex g_blastMutex;
 static std::vector<HeBlast> g_blasts;
 static std::mutex g_bulletHoleMutex;
 static std::vector<BulletHole> g_bulletHoles;
-static std::atomic<int> g_heRadiusMilli{200000};         // bv_he_radius * 1000 (default 200)
-static std::atomic<int> g_heDurationMilli{3050};         // bv_he_duration * 1000 (default 3.05s)
-static std::atomic<int> g_bulletRadiusMilli{12000};      // bv_bullet_radius * 1000 (default 12)
-static std::atomic<int> g_bulletDurationMilli{200};      // bv_bullet_duration * 1000 (default 0.2s)
-static std::atomic<int> g_bulletRangeMilli{8192000};     // bv_bullet_range * 1000 (default 8192)
-static std::atomic<int> g_bulletHolesEnabled{1};         // bv_bullet_holes (default on)
-static std::string g_heListenerStatus = "not_attempted"; // hegrenade_detonate registration result
+static std::atomic<int> g_heRadiusMilli{75000};            // bv_he_radius * 1000 (default 75)
+static std::atomic<int> g_heDurationMilli{3200};           // bv_he_duration * 1000 (default 3.2s)
+static std::atomic<int> g_bulletRadiusMilli{12000};        // bv_bullet_radius * 1000 (default 12)
+static std::atomic<int> g_bulletRadiusShotgunMilli{28000}; // bv_bullet_radius_shotgun * 1000 (default 28)
+static std::atomic<int> g_bulletDurationMilli{150};        // bv_bullet_duration * 1000 (default 0.15s)
+static std::atomic<int> g_bulletRangeMilli{8192000};       // bv_bullet_range * 1000 (default 8192)
+static std::atomic<int> g_bulletHolesEnabled{1};           // bv_bullet_holes (default on)
+static std::string g_heListenerStatus = "not_attempted";   // hegrenade_detonate registration result
 
 using IsVisibleThroughSmoke_t = bool(__fastcall *)(void *self, const void *from, const void *to);
 
@@ -61,9 +65,9 @@ using HeDetonate_t = __int64(__fastcall *)(void *self);
 static HeDetonate_t g_origHeDetonate = nullptr;
 static const char *kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 
-// CBaseEntity origin layout
-static const int kSceneNodeOffset = 624;
-static const int kAbsOriginOffset = 200;
+// CBaseEntity (offsets loaded from gamedata)
+static int kSceneNodeOffset = 624;
+static int kAbsOriginOffset = 200;
 
 // Per-pellet bullet trace
 using PelletTrace_t = __int64(__fastcall *)(
@@ -72,6 +76,40 @@ using PelletTrace_t = __int64(__fastcall *)(
     __int64 a15, __int64 a16, int a17, int a18, void *a19, __int64 a20);
 static PelletTrace_t g_origPelletTrace = nullptr;
 static const char *kPelletTraceName = "BulletPelletTrace";
+
+// CCSPlayer_WeaponServices::GetSlot - resolve active weapon for shotgun check
+using GetSlot_t = void *(__fastcall *)(void *ws, int slot, unsigned int pos);
+static GetSlot_t g_pGetSlot = nullptr;
+static const char *kGetSlotName = "CCSPlayer_WeaponServices::GetSlot";
+
+// CCSBot::IsVisible(pos) - wraps the smoke check; a1 = querying bot pawn
+using IsVisiblePos_t = __int64(__fastcall *)(__int64 self, __int64 pos, char testFOV, void *ent);
+static IsVisiblePos_t g_origIsVisiblePos = nullptr;
+static const char *kIsVisiblePosName = "CCSBot::IsVisiblePos";
+
+// pawn -> m_hController(0xB80); controller entindex-1 == engine slot (status id)
+static int kOffControllerHandleInPawn = 0xB80;
+// CCSBot AI object holds its pawn pointer
+static int kOffPawnInBot = 0x18;
+static const int kMaxBots = 64;
+
+// pawn -> WeaponServices(0xA00) -> m_hActiveWeapon(0x60); weapon -> def index(0x9E0)
+static int kOffWeaponServicesInPawn = 0xA00;
+static int kOffActiveWeaponInWs = 0x60;
+static int kOffItemDefIndexInWeapon = 0x9E0;
+static int kOffEntityIdentity = 0x10;
+static int kOffEHandleInIdentity = 0x10;
+
+// items_game def indices for shotguns
+static bool IsShotgunDef(int def)
+{
+    return def == 25 /*xm1014*/ || def == 27 /*mag7*/ ||
+           def == 29 /*sawedoff*/ || def == 35 /*nova*/;
+}
+
+// Probe state: last active-weapon def seen by the pellet hook
+static std::atomic<int> g_lastWeaponDef{-1};
+static std::atomic<int> g_lastWeaponShotgun{0};
 
 // Verification state
 static std::atomic<long long> g_bulletCount{0};
@@ -85,12 +123,29 @@ static std::atomic<long long> g_traceHits{0};     // times TraceEndShape returne
 
 static IsVisibleThroughSmoke_t g_origIsVisibleThroughSmoke = nullptr;
 static GetSmokeDensityInLine_t g_fnGetSmokeDensityInLine = nullptr;
+
+// funchook detours (orig trampolines written into the g_orig* pointers above)
+static cs2bv::hooks::CDetour<IsVisibleThroughSmoke_t> g_dIsVisibleThroughSmoke{"CBotManager::IsVisibleThroughSmoke"};
+static cs2bv::hooks::CDetour<HeDetonate_t> g_dHeDetonate{kHeDetonateName};
+static cs2bv::hooks::CDetour<PelletTrace_t> g_dPelletTrace{kPelletTraceName};
+static cs2bv::hooks::CDetour<IsVisiblePos_t> g_dIsVisiblePos{kIsVisiblePosName};
+
 static std::atomic<long long> g_hitCount{0};
 static std::atomic<long long> g_blockedCount{0};
 static void **g_pAutoListHead = nullptr;
 static std::string g_hookedStatus = "not_attempted"; // bv_status
 static std::atomic<int> g_smokeMode{0};
 static std::atomic<int> g_densityThrMilli{200}; // bv_density_threshold * 1000 (default 0.2 → 200)
+
+// Per-bot density threshold (indexed by engine slot 0..63). INT_MIN = use global default.
+// Stamped by the IsVisiblePos hook, read by the smoke hook on the same thread.
+static const int kSlotDefault = INT_MIN;
+static std::atomic<int> g_botThrMilli[kMaxBots];
+static thread_local int g_curBotSlot = -1;               // slot of the bot currently querying (-1 = none/non-bot)
+static std::atomic<int> g_lastBotSlot{-1};               // last slot seen by IsVisiblePos
+static std::atomic<long long> g_isVisiblePosCalls{0};    // times IsVisiblePos hook fired
+static std::atomic<unsigned int> g_lastCtrlHandle{0};    // last raw controller handle read
+static std::atomic<unsigned long long> g_lastPawnPtr{0}; // last pawn ptr
 
 static const char *kFuncName = "CBotManager::IsVisibleThroughSmoke";
 static const char *kHeadName = "g_AutoList_SmokeProj_Head_Server";
@@ -211,8 +266,7 @@ static float DistSqSegSeg(const float p1[3], const float q1[3],
 static bool SegmentClearedByBulletHole(const float *from, const float * /*to*/)
 {
     float dur = g_bulletDurationMilli.load(std::memory_order_relaxed) * 0.001f;
-    float r = g_bulletRadiusMilli.load(std::memory_order_relaxed) * 0.001f;
-    if (dur <= 0.0f || r <= 0.0f)
+    if (dur <= 0.0f)
         return false;
     float now = NowTime();
 
@@ -225,11 +279,51 @@ static bool SegmentClearedByBulletHole(const float *from, const float * /*to*/)
         if (age < 0.0f || age >= dur)
             continue;
         g_bulletHoles[w++] = g_bulletHoles[i];
-        if (DistSqPointSeg(from, g_bulletHoles[i].start, g_bulletHoles[i].end) <= r * r)
+        float r = g_bulletHoles[i].radius; // per-hole radius (shotgun = wider)
+        if (r > 0.0f &&
+            DistSqPointSeg(from, g_bulletHoles[i].start, g_bulletHoles[i].end) <= r * r)
             cleared = true;
     }
     g_bulletHoles.resize(w);
     return cleared;
+}
+
+// Resolve shooter pawn's active-weapon def index via GetSlot
+static int ActiveWeaponDef(void *pawn)
+{
+    if (!pawn || !g_pGetSlot)
+        return -1;
+    void *ws = *reinterpret_cast<void **>(
+        reinterpret_cast<char *>(pawn) + kOffWeaponServicesInPawn);
+    if (!ws)
+        return -1;
+    uint32_t activeH = *reinterpret_cast<uint32_t *>(
+        reinterpret_cast<char *>(ws) + kOffActiveWeaponInWs);
+    if (activeH == 0u || activeH == 0xFFFFFFFFu)
+        return -1;
+    int activeIdx = static_cast<int>(activeH & 0x7FFFu);
+    for (int slot = 0; slot <= 4; ++slot)
+    {
+        unsigned int maxPos = (slot == 3) ? 8u : 1u; // grenades slot holds many
+        for (unsigned int pos = 0; pos < maxPos; ++pos)
+        {
+            unsigned int posArg = (slot == 3) ? pos : 0xFFFFFFFFu;
+            void *w = g_pGetSlot(ws, slot, posArg);
+            if (!w)
+                continue;
+            void *identity = *reinterpret_cast<void **>(
+                reinterpret_cast<char *>(w) + kOffEntityIdentity);
+            if (!identity)
+                continue;
+            uint32_t h = *reinterpret_cast<uint32_t *>(
+                reinterpret_cast<char *>(identity) + kOffEHandleInIdentity);
+            if ((static_cast<int>(h & 0x7FFFu)) != activeIdx)
+                continue;
+            return *reinterpret_cast<uint16_t *>(
+                reinterpret_cast<char *>(w) + kOffItemDefIndexInWeapon);
+        }
+    }
+    return -1;
 }
 
 // Per-pellet trace
@@ -276,26 +370,35 @@ static __int64 __fastcall HookedPelletTrace(
             float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
             if (len > 1e-4f)
             {
+                // shooter pawn; also used to pick per-weapon radius
+                void *shooter = nullptr;
+                if (a1)
+                    shooter = *reinterpret_cast<void **>(a1 + 56);
+                // resolve active weapon -> shotgun gets a wider hole
+                int def = ActiveWeaponDef(shooter);
+                bool isShotgun = IsShotgunDef(def);
+                g_lastWeaponDef.store(def, std::memory_order_relaxed);
+                g_lastWeaponShotgun.store(isShotgun ? 1 : 0, std::memory_order_relaxed);
+                float radius = (isShotgun ? g_bulletRadiusShotgunMilli : g_bulletRadiusMilli)
+                                   .load(std::memory_order_relaxed) *
+                               0.001f;
+
                 float range = g_bulletRangeMilli.load(std::memory_order_relaxed) * 0.001f;
                 float inv = range / len;
                 cs2bv::rt::Vector start{src[0], src[1], src[2]};
                 cs2bv::rt::Vector end{src[0] + dir[0] * inv, src[1] + dir[1] * inv, src[2] + dir[2] * inv};
-                // ignore the shooter pawn (*(a1+56)) so the trace doesn't hit our own body
-                void *shooter = nullptr;
-                if (a1)
-                    shooter = *reinterpret_cast<void **>(a1 + 56);
                 cs2bv::rt::TraceOptions opts; // default InteractsWith = MASK_SHOT_PHYSICS
                 cs2bv::rt::TraceResult res;
                 if (g_pRayTrace->TraceEndShape(&start, &end, shooter, &opts, &res))
                 {
                     g_traceHits.fetch_add(1, std::memory_order_relaxed);
                     float endp[3] = {res.EndPos.x, res.EndPos.y, res.EndPos.z};
-                    cs2bv::hooks::OnBulletHole(src, endp);
+                    cs2bv::hooks::OnBulletHole(src, endp, radius);
                 }
                 else
                 {
                     float endp[3] = {end.x, end.y, end.z}; // no hit → full range
-                    cs2bv::hooks::OnBulletHole(src, endp);
+                    cs2bv::hooks::OnBulletHole(src, endp, radius);
                 }
             }
         }
@@ -320,6 +423,42 @@ static __int64 __fastcall HookedHeDetonate(void *self)
     return g_origHeDetonate(self);
 }
 
+// Resolve the querying bot's engine slot from the CCSBot AI object
+static int BotSlotFromBot(__int64 bot)
+{
+    if (!bot)
+        return -1;
+    __int64 pawn = *reinterpret_cast<__int64 *>(
+        reinterpret_cast<char *>(bot) + kOffPawnInBot);
+    g_lastPawnPtr.store(static_cast<unsigned long long>(pawn), std::memory_order_relaxed);
+    if (!pawn)
+        return -1;
+    uint32_t h = *reinterpret_cast<uint32_t *>(
+        reinterpret_cast<char *>(pawn) + kOffControllerHandleInPawn);
+    g_lastCtrlHandle.store(h, std::memory_order_relaxed); // probe: raw handle
+    if (h == 0u || h == 0xFFFFFFFFu)
+        return -1;
+    int ctrlIdx = static_cast<int>(h & 0x7FFFu);
+    int slot = ctrlIdx - 1; // controller entindex is slot+1
+    if (slot < 0 || slot >= kMaxBots)
+        return -1;
+    return slot;
+}
+
+// CCSBot::IsVisible(pos)
+static __int64 __fastcall HookedIsVisiblePos(__int64 self, __int64 pos, char testFOV, void *ent)
+{
+    g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed); // probe: hook fired
+    int prev = g_curBotSlot;
+    int slot = BotSlotFromBot(self);
+    g_curBotSlot = slot;
+    if (slot >= 0)
+        g_lastBotSlot.store(slot, std::memory_order_relaxed);
+    __int64 ret = g_origIsVisiblePos(self, pos, testFOV, ent);
+    g_curBotSlot = prev;
+    return ret;
+}
+
 static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from, const void *to)
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
@@ -335,7 +474,16 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
     const float *fa = static_cast<const float *>(from);
     const float *fb = static_cast<const float *>(to);
     float dens = g_fnGetSmokeDensityInLine(fa, fb, nullptr);
-    float thr = g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f;
+    // Per-bot threshold
+    int thrMilli = g_densityThrMilli.load(std::memory_order_relaxed);
+    int slot = g_curBotSlot;
+    if (slot >= 0 && slot < kMaxBots)
+    {
+        int botThr = g_botThrMilli[slot].load(std::memory_order_relaxed);
+        if (botThr != kSlotDefault)
+            thrMilli = botThr;
+    }
+    float thr = thrMilli * 0.001f;
     if (dens >= thr)
     {
         if (SegmentClearedByHeHole(fa, fb))
@@ -434,12 +582,28 @@ namespace cs2bv::hooks
 
     bool Install(const std::string &gamedataPath, void *serverInterface, char *error, size_t maxlen)
     {
+        // Per-bot thresholds start unset
+        for (int i = 0; i < kMaxBots; ++i)
+            g_botThrMilli[i].store(kSlotDefault, std::memory_order_relaxed);
+
         nlohmann::json gamedata;
         if (!cs2bv::sig::LoadGamedata(gamedataPath.c_str(), gamedata))
         {
             ReportError(error, maxlen, "failed to read/parse gamedata.json at %s", gamedataPath.c_str());
             return false;
         }
+
+        // Load class-member offsets (fall back to built-in defaults if absent)
+        using cs2bv::sig::ResolveOffset;
+        kSceneNodeOffset = ResolveOffset(gamedata, "CBaseEntity::m_pGameSceneNode", kSceneNodeOffset);
+        kAbsOriginOffset = ResolveOffset(gamedata, "CGameSceneNode::m_vecAbsOrigin", kAbsOriginOffset);
+        kOffControllerHandleInPawn = ResolveOffset(gamedata, "CBasePlayerPawn::m_hController", kOffControllerHandleInPawn);
+        kOffPawnInBot = ResolveOffset(gamedata, "CCSBot::m_pPawn", kOffPawnInBot);
+        kOffWeaponServicesInPawn = ResolveOffset(gamedata, "CBasePlayerPawn::m_pWeaponServices", kOffWeaponServicesInPawn);
+        kOffActiveWeaponInWs = ResolveOffset(gamedata, "CPlayer_WeaponServices::m_hActiveWeapon", kOffActiveWeaponInWs);
+        kOffItemDefIndexInWeapon = ResolveOffset(gamedata, "CEconItemView::m_iItemDefinitionIndex", kOffItemDefIndexInWeapon);
+        kOffEntityIdentity = ResolveOffset(gamedata, "CEntityInstance::m_pEntity", kOffEntityIdentity);
+        kOffEHandleInIdentity = kOffEntityIdentity; // same 0x10 slot
 
         cs2bv::sig::ModuleInfo server = cs2bv::sig::ModuleFromInterfacePtr(serverInterface);
         if (!server)
@@ -464,22 +628,18 @@ namespace cs2bv::hooks
 
         TryResolveAutoListHead(gamedata, server);
 
-        if (MH_Initialize() != MH_OK)
+        if (!g_dIsVisibleThroughSmoke.Create(target, reinterpret_cast<void *>(&HookedIsVisibleThroughSmoke),
+                                             reinterpret_cast<void **>(&g_origIsVisibleThroughSmoke)))
         {
-            ReportError(error, maxlen, "MH_Initialize failed");
+            ReportError(error, maxlen, "funchook_prepare failed for %s", kFuncName);
             return false;
         }
-        if (MH_CreateHook(target, reinterpret_cast<void *>(&HookedIsVisibleThroughSmoke),
-                          reinterpret_cast<void **>(&g_origIsVisibleThroughSmoke)) != MH_OK)
+        if (!g_dIsVisibleThroughSmoke.Enable())
         {
-            ReportError(error, maxlen, "MH_CreateHook failed");
+            ReportError(error, maxlen, "funchook_install failed for %s", kFuncName);
             return false;
         }
-        if (MH_EnableHook(target) != MH_OK)
-        {
-            ReportError(error, maxlen, "MH_EnableHook failed");
-            return false;
-        }
+
 
         // Resolve GetSmokeDensityInLine
         {
@@ -507,9 +667,9 @@ namespace cs2bv::hooks
             char heErr[256] = {0};
             void *heTarget = cs2bv::sig::ResolveSig(gamedata, server, kHeDetonateName, heErr, sizeof(heErr));
             if (heTarget &&
-                MH_CreateHook(heTarget, reinterpret_cast<void *>(&HookedHeDetonate),
-                              reinterpret_cast<void **>(&g_origHeDetonate)) == MH_OK &&
-                MH_EnableHook(heTarget) == MH_OK)
+                g_dHeDetonate.Create(heTarget, reinterpret_cast<void *>(&HookedHeDetonate),
+                                     reinterpret_cast<void **>(&g_origHeDetonate)) &&
+                g_dHeDetonate.Enable())
             {
                 char hb[160];
                 std::snprintf(hb, sizeof(hb),
@@ -522,7 +682,7 @@ namespace cs2bv::hooks
                 char hb[320];
                 std::snprintf(hb, sizeof(hb),
                               "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
-                              heTarget ? "MinHook error" : heErr);
+                              heTarget ? "funchook error" : heErr);
                 OutputDebugStringA(hb);
                 g_heListenerStatus = heTarget ? "hook=FAIL" : "sig=FAIL";
             }
@@ -533,9 +693,9 @@ namespace cs2bv::hooks
             char fbErr[256] = {0};
             void *fbTarget = cs2bv::sig::ResolveSig(gamedata, server, kPelletTraceName, fbErr, sizeof(fbErr));
             if (fbTarget &&
-                MH_CreateHook(fbTarget, reinterpret_cast<void *>(&HookedPelletTrace),
-                              reinterpret_cast<void **>(&g_origPelletTrace)) == MH_OK &&
-                MH_EnableHook(fbTarget) == MH_OK)
+                g_dPelletTrace.Create(fbTarget, reinterpret_cast<void *>(&HookedPelletTrace),
+                                      reinterpret_cast<void **>(&g_origPelletTrace)) &&
+                g_dPelletTrace.Enable())
             {
                 char fb[160];
                 std::snprintf(fb, sizeof(fb),
@@ -547,8 +707,53 @@ namespace cs2bv::hooks
                 char fb[320];
                 std::snprintf(fb, sizeof(fb),
                               "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
-                              fbTarget ? "MinHook error" : fbErr);
+                              fbTarget ? "funchook error" : fbErr);
                 OutputDebugStringA(fb);
+            }
+        }
+
+        // Resolve GetSlot
+        {
+            char gsErr[256] = {0};
+            void *gsTarget = cs2bv::sig::ResolveSig(gamedata, server, kGetSlotName, gsErr, sizeof(gsErr));
+            if (gsTarget)
+            {
+                g_pGetSlot = reinterpret_cast<GetSlot_t>(gsTarget);
+                char gs[160];
+                std::snprintf(gs, sizeof(gs),
+                              "[BotVision] %s @ %p (shotgun radius active)\n", kGetSlotName, gsTarget);
+                OutputDebugStringA(gs);
+            }
+            else
+            {
+                char gs[320];
+                std::snprintf(gs, sizeof(gs),
+                              "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", gsErr);
+                OutputDebugStringA(gs);
+            }
+        }
+
+        // Resolve + hook CCSBot::IsVisible(pos)
+        {
+            char ivErr[256] = {0};
+            void *ivTarget = cs2bv::sig::ResolveSig(gamedata, server, kIsVisiblePosName, ivErr, sizeof(ivErr));
+            if (ivTarget &&
+                g_dIsVisiblePos.Create(ivTarget, reinterpret_cast<void *>(&HookedIsVisiblePos),
+                                       reinterpret_cast<void **>(&g_origIsVisiblePos)) &&
+                g_dIsVisiblePos.Enable())
+            {
+                char iv[160];
+                std::snprintf(iv, sizeof(iv),
+                              "[BotVision] %s @ %p (per-bot density active)\n", kIsVisiblePosName, ivTarget);
+                OutputDebugStringA(iv);
+            }
+            else
+            {
+                char iv[320];
+                std::snprintf(iv, sizeof(iv),
+                              "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n",
+                              ivTarget ? "funchook error" : ivErr);
+                OutputDebugStringA(iv);
             }
         }
 
@@ -558,8 +763,10 @@ namespace cs2bv::hooks
 
     void Remove()
     {
-        MH_DisableHook(MH_ALL_HOOKS);
-        MH_Uninitialize();
+        g_dIsVisibleThroughSmoke.Free();
+        g_dHeDetonate.Free();
+        g_dPelletTrace.Free();
+        g_dIsVisiblePos.Free();
         char buf[160];
         std::snprintf(buf, sizeof(buf), "[BotVision] removed: hits=%lld blocked=%lld\n",
                       static_cast<long long>(g_hitCount.load()),
@@ -576,6 +783,31 @@ namespace cs2bv::hooks
     void SetDensityThreshold(float v) { g_densityThrMilli.store((int)(v * 1000), std::memory_order_relaxed); }
     float GetDensityThreshold() { return g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f; }
     bool IsDensityFnResolved() { return g_fnGetSmokeDensityInLine != nullptr; }
+
+    // Per-bot density threshold
+    void SetBotDensityThreshold(int slot, float v)
+    {
+        if (slot < 0 || slot >= kMaxBots)
+            return;
+        if (v < 0.0f)
+            g_botThrMilli[slot].store(kSlotDefault, std::memory_order_relaxed);
+        else
+            g_botThrMilli[slot].store((int)(v * 1000), std::memory_order_relaxed);
+    }
+    // Returns slot's threshold, or -1 if unset
+    float GetBotDensityThreshold(int slot)
+    {
+        if (slot < 0 || slot >= kMaxBots)
+            return -1.0f;
+        int m = g_botThrMilli[slot].load(std::memory_order_relaxed);
+        return m == kSlotDefault ? -1.0f : m * 0.001f;
+    }
+    int GetMaxBots() { return kMaxBots; }
+    int GetLastBotSlot() { return g_lastBotSlot.load(std::memory_order_relaxed); }
+    bool IsVisiblePosHooked() { return g_origIsVisiblePos != nullptr; }
+    long long GetIsVisiblePosCalls() { return g_isVisiblePosCalls.load(std::memory_order_relaxed); }
+    unsigned int GetLastCtrlHandle() { return g_lastCtrlHandle.load(std::memory_order_relaxed); }
+    unsigned long long GetLastPawnPtr() { return g_lastPawnPtr.load(std::memory_order_relaxed); }
 
     void SetEngine(void *engine) { g_pEngine = static_cast<IVEngineServer2 *>(engine); }
 
@@ -607,7 +839,7 @@ namespace cs2bv::hooks
     float GetHeDuration() { return g_heDurationMilli.load(std::memory_order_relaxed) * 0.001f; }
 
     // Record a bullet capsule hole
-    void OnBulletHole(const float start[3], const float end[3])
+    void OnBulletHole(const float start[3], const float end[3], float radius)
     {
         float t = NowTime();
         std::lock_guard<std::mutex> lk(g_bulletHoleMutex);
@@ -620,6 +852,7 @@ namespace cs2bv::hooks
                 h.end[i] = end[i];
             }
             h.startTime = t;
+            h.radius = radius;
             g_bulletHoles.push_back(h);
         }
         else
@@ -635,11 +868,14 @@ namespace cs2bv::hooks
                 g_bulletHoles[oldest].end[i] = end[i];
             }
             g_bulletHoles[oldest].startTime = t;
+            g_bulletHoles[oldest].radius = radius;
         }
     }
 
     void SetBulletRadius(float v) { g_bulletRadiusMilli.store((int)(v * 1000), std::memory_order_relaxed); }
     float GetBulletRadius() { return g_bulletRadiusMilli.load(std::memory_order_relaxed) * 0.001f; }
+    void SetBulletRadiusShotgun(float v) { g_bulletRadiusShotgunMilli.store((int)(v * 1000), std::memory_order_relaxed); }
+    float GetBulletRadiusShotgun() { return g_bulletRadiusShotgunMilli.load(std::memory_order_relaxed) * 0.001f; }
     void SetBulletDuration(float v) { g_bulletDurationMilli.store((int)(v * 1000), std::memory_order_relaxed); }
     float GetBulletDuration() { return g_bulletDurationMilli.load(std::memory_order_relaxed) * 0.001f; }
     void SetBulletRange(float v) { g_bulletRangeMilli.store((int)(v * 1000), std::memory_order_relaxed); }
@@ -693,6 +929,20 @@ namespace cs2bv::hooks
                       g_pAutoListHead ? "set" : "NULL",
                       static_cast<long long>(g_traceAttempts.load(std::memory_order_relaxed)),
                       static_cast<long long>(g_traceHits.load(std::memory_order_relaxed)));
+        return buf;
+    }
+
+    // Probe: last active-weapon def index seen by the pellet hook
+    const char *GetWeaponProbe()
+    {
+        static char buf[128];
+        int def = g_lastWeaponDef.load(std::memory_order_relaxed);
+        std::snprintf(buf, sizeof(buf),
+                      "lastDef=%d shotgun=%d shotgunRadius=%.1f normalRadius=%.1f getSlot=%s",
+                      def,
+                      g_lastWeaponShotgun.load(std::memory_order_relaxed),
+                      GetBulletRadiusShotgun(), GetBulletRadius(),
+                      g_pGetSlot ? "OK" : "NULL");
         return buf;
     }
 

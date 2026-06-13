@@ -309,4 +309,19 @@ namespace cs2bv::sig
         }
         return addr;
     }
+
+    // Read gamedata[name].offsets.<platform>; defVal if entry/key missing or not integer
+    int ResolveOffset(const nlohmann::json &gamedata, const char *name, int defVal)
+    {
+        auto it = gamedata.find(name);
+        if (it == gamedata.end() || !it->is_object())
+            return defVal;
+        auto offIt = it->find("offsets");
+        if (offIt == it->end() || !offIt->is_object())
+            return defVal;
+        auto platIt = offIt->find(PlatformName());
+        if (platIt == offIt->end() || !platIt->is_number_integer())
+            return defVal;
+        return platIt->get<int>();
+    }
 } // namespace cs2bv::sig

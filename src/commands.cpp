@@ -121,6 +121,67 @@ CON_COMMAND_F(bv_density_threshold,
                                    cs2bv::hooks::GetDensityThreshold());
 }
 
+CON_COMMAND_F(bv_bot_density,
+              "bv_bot_density [<slot> <d>]  per-bot density threshold. "
+              "Negative d clears back to global. No args lists all set slots.",
+              FCVAR_NONE)
+{
+    /* list every slot*/
+    if (args.ArgC() < 2)
+    {
+        if (!cs2bv::hooks::IsVisiblePosHooked())
+        {
+            cs2bv::commands::PrintToCaller(context,
+                                           "per-bot density unavailable (IsVisiblePos hook failed)\n");
+            return;
+        }
+        cs2bv::commands::PrintToCaller(context,
+                                       "per-bot density (global default=%.3f, lastBotSlot=%d):\n",
+                                       cs2bv::hooks::GetDensityThreshold(),
+                                       cs2bv::hooks::GetLastBotSlot());
+        cs2bv::commands::PrintToCaller(context,
+                                       "  probe: isVisiblePosCalls=%lld lastCtrlHandle=0x%X pawn=0x%llX\n",
+                                       static_cast<long long>(cs2bv::hooks::GetIsVisiblePosCalls()),
+                                       cs2bv::hooks::GetLastCtrlHandle(),
+                                       static_cast<unsigned long long>(cs2bv::hooks::GetLastPawnPtr()));
+        int n = cs2bv::hooks::GetMaxBots();
+        int shown = 0;
+        for (int s = 0; s < n; ++s)
+        {
+            float v = cs2bv::hooks::GetBotDensityThreshold(s);
+            if (v >= 0.0f)
+            {
+                cs2bv::commands::PrintToCaller(context, "  slot %d = %.3f\n", s, v);
+                ++shown;
+            }
+        }
+        if (shown == 0)
+            cs2bv::commands::PrintToCaller(context, "  (none set; all bots use default)\n");
+        return;
+    }
+    /* query a single slot */
+    int slot = std::atoi(args.Arg(1));
+    if (args.ArgC() < 3)
+    {
+        float v = cs2bv::hooks::GetBotDensityThreshold(slot);
+        if (v < 0.0f)
+            cs2bv::commands::PrintToCaller(context,
+                                           "slot %d uses default (%.3f)\n",
+                                           slot, cs2bv::hooks::GetDensityThreshold());
+        else
+            cs2bv::commands::PrintToCaller(context, "slot %d density = %.3f\n", slot, v);
+        return;
+    }
+    /* set (or clear if negative) */
+    float v = (float)std::atof(args.Arg(2));
+    cs2bv::hooks::SetBotDensityThreshold(slot, v);
+    if (v < 0.0f)
+        cs2bv::commands::PrintToCaller(context, "slot %d density cleared (uses default)\n", slot);
+    else
+        cs2bv::commands::PrintToCaller(context, "slot %d density set to %.3f\n",
+                                       slot, cs2bv::hooks::GetBotDensityThreshold(slot));
+}
+
 CON_COMMAND_F(bv_he_radius,
               "bv_he_radius <r>  HE smoke-hole radius in units (default 200).",
               FCVAR_NONE)
@@ -175,6 +236,24 @@ CON_COMMAND_F(bv_bullet_radius,
                                    cs2bv::hooks::GetBulletRadius());
 }
 
+CON_COMMAND_F(bv_bullet_radius_shotgun,
+              "bv_bullet_radius_shotgun <r>  shotgun bullet-hole radius in units (default 28).",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        cs2bv::commands::PrintToCaller(context, "current shotgun bullet hole radius = %.1f\n",
+                                       cs2bv::hooks::GetBulletRadiusShotgun());
+        return;
+    }
+    float v = (float)std::atof(args.Arg(1));
+    if (v < 0.0f)
+        v = 0.0f;
+    cs2bv::hooks::SetBulletRadiusShotgun(v);
+    cs2bv::commands::PrintToCaller(context, "shotgun bullet hole radius set to %.1f\n",
+                                   cs2bv::hooks::GetBulletRadiusShotgun());
+}
+
 CON_COMMAND_F(bv_bullet_duration,
               "bv_bullet_duration <s>  bullet hole lifetime in seconds (default 0.2).",
               FCVAR_NONE)
@@ -191,24 +270,6 @@ CON_COMMAND_F(bv_bullet_duration,
     cs2bv::hooks::SetBulletDuration(v);
     cs2bv::commands::PrintToCaller(context, "bullet hole duration set to %.2f\n",
                                    cs2bv::hooks::GetBulletDuration());
-}
-
-CON_COMMAND_F(bv_bullet_range,
-              "bv_bullet_range <r>  max bullet path length in units (default 8192).",
-              FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current bullet range = %.1f\n",
-                                       cs2bv::hooks::GetBulletRange());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f)
-        v = 0.0f;
-    cs2bv::hooks::SetBulletRange(v);
-    cs2bv::commands::PrintToCaller(context, "bullet range set to %.1f\n",
-                                   cs2bv::hooks::GetBulletRange());
 }
 
 CON_COMMAND_F(bv_bullet_holes,

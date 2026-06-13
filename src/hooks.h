@@ -26,9 +26,12 @@ namespace cs2bv::hooks
     const char *GetHeListenerStatus();
 
     // Bullet smoke-hole support
-    void OnBulletHole(const float start[3], const float end[3]);
+    void OnBulletHole(const float start[3], const float end[3], float radius);
     void SetBulletRadius(float v);
     float GetBulletRadius();
+    void SetBulletRadiusShotgun(float v);
+    float GetBulletRadiusShotgun();
+    const char *GetWeaponProbe();
     void SetBulletDuration(float v);
     float GetBulletDuration();
     void SetBulletRange(float v);
@@ -52,5 +55,15 @@ namespace cs2bv::hooks
     void SetDensityThreshold(float v);
     float GetDensityThreshold();
     bool IsDensityFnResolved();
+
+    // Per-bot density threshold
+    void SetBotDensityThreshold(int slot, float v);
+    float GetBotDensityThreshold(int slot); // -1 if unset
+    int GetMaxBots();
+    int GetLastBotSlot();                // last slot seen by IsVisiblePos hook (-1 = none)
+    bool IsVisiblePosHooked();           // false = per-bot density unavailable
+    long long GetIsVisiblePosCalls();    // probe: times the hook fired
+    unsigned int GetLastCtrlHandle();    // probe: last raw controller handle read
+    unsigned long long GetLastPawnPtr(); // probe: last pawn ptr
 
 } // namespace cs2bv::hooks

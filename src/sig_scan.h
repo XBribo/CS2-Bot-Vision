@@ -48,4 +48,7 @@ namespace cs2bv::sig
 
     void *ResolveSig(const nlohmann::json &gamedata, const ModuleInfo &module,
                      const char *name, char *errorOut, size_t errorOutLen);
+
+    // Read a platform offset from gamedata[name].offsets.<platform>; defVal if absent
+    int ResolveOffset(const nlohmann::json &gamedata, const char *name, int defVal);
 }

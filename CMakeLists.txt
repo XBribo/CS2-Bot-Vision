@@ -51,13 +51,15 @@ add_custom_command(
 )
 
 include(FetchContent)
-if(DEFINED ENV{MINHOOK_SOURCE} AND EXISTS "$ENV{MINHOOK_SOURCE}/CMakeLists.txt")
-    set(FETCHCONTENT_SOURCE_DIR_MINHOOK "$ENV{MINHOOK_SOURCE}" CACHE PATH "")
+if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt")
+    set(FETCHCONTENT_SOURCE_DIR_FUNCHOOK "$ENV{FUNCHOOK_SOURCE}" CACHE PATH "")
 endif()
-FetchContent_Declare(minhook
-    GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(FUNCHOOK_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(funchook
+    GIT_REPOSITORY https://github.com/kubo/funchook.git
     GIT_TAG master GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(minhook)
+FetchContent_MakeAvailable(funchook)
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
@@ -100,7 +102,7 @@ target_include_directories(BotVision PRIVATE
 
 set(HL2SDK_LIBDIR ${HL2SDK}/lib/public/win64)
 target_link_libraries(BotVision PRIVATE
-    minhook psapi
+    funchook-static psapi
     ${HL2SDK_LIBDIR}/tier0.lib
     ${HL2SDK_LIBDIR}/tier1.lib
     ${HL2SDK_LIBDIR}/mathlib.lib
