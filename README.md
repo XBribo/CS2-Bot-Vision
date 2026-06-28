@@ -60,7 +60,9 @@ Env required: `HL2SDKCS2`, `MMSOURCE_DEV`, `CSGO_PROTO`, plus `protoc`
 
 ## License
 
-GPLv3
+CS2-Bot-Vision is licensed under the GNU Affero General Public License version 3 (AGPL-3.0).
+Commercial use involving closed-source distribution or hosted services may require a separate license.
+See the LICENSE file for details.
 
 ------------------------------------------------------------------------
 
