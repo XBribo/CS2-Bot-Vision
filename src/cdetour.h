@@ -1,7 +1,6 @@
 // cdetour.h
 //
-// Thin funchook wrapper for inline detours (cross-platform: Windows + Linux x64).
-// Target address comes from the existing sig layer; this only owns the funchook handle.
+// Thin funchook wrapper for inline detours.
 
 #pragma once
 
@@ -20,7 +19,7 @@ namespace cs2bv::hooks
         CDetour(const CDetour &) = delete;
         CDetour &operator=(const CDetour &) = delete;
 
-        /* Prepare a detour at `target`; writes the trampoline (orig caller) into *origOut.
+        /* Prepare a detour at `target`; writes the trampoline into *origOut.
            Returns false on alloc/prepare failure */
         bool Create(void *target, void *detour, void **origOut)
         {
@@ -29,7 +28,7 @@ namespace cs2bv::hooks
             m_hook = funchook_create();
             if (!m_hook)
                 return false;
-            *origOut = target; // funchook_prepare rewrites this to the trampoline
+            *origOut = target;
             if (funchook_prepare(m_hook, origOut, detour) != FUNCHOOK_ERROR_SUCCESS)
             {
                 funchook_destroy(m_hook);

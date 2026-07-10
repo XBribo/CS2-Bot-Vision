@@ -20,13 +20,13 @@
 #include <nlohmann/json.hpp>
 
 #include <eiface.h> // IVEngineServer2::GetServerGlobals
-#include <edict.h>  // CGlobalVars (curtime)
+#include <edict.h>  // CGlobalVars
 
 /* HE detonate hook */
 struct HeBlast
 {
-    float x, y, z;   // detonation center
-    float startTime; // curtime when recorded
+    float x, y, z; // detonation center
+    float startTime;
 };
 
 /* Per-pellet bullet hole*/
@@ -34,8 +34,8 @@ struct BulletHole
 {
     float start[3];
     float end[3];
-    float startTime; // curtime when recorded
-    float radius;    // per-hole radius
+    float startTime;
+    float radius; // per-hole radius
 };
 
 static const size_t kMaxBulletHoles = 64; // ring cap; LOS query bounded by this
@@ -65,8 +65,9 @@ using HeDetonate_t = __int64(__fastcall *)(void *self);
 static HeDetonate_t g_origHeDetonate = nullptr;
 static const char *kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 
-// CBaseEntity (offsets loaded from gamedata)
-static int kSceneNodeOffset = 624;
+// CBaseEntity -> CBodyComponent* -> CGameSceneNode* (offsets loaded from gamedata)
+static int kBodyComponentOffset = 0x30;
+static int kSceneNodeInBodyComponentOffset = 0x8;
 static int kAbsOriginOffset = 200;
 
 // Per-pellet bullet trace
@@ -87,16 +88,16 @@ using IsVisiblePos_t = __int64(__fastcall *)(__int64 self, __int64 pos, char tes
 static IsVisiblePos_t g_origIsVisiblePos = nullptr;
 static const char *kIsVisiblePosName = "CCSBot::IsVisiblePos";
 
-// pawn -> m_hController(0xB80); controller entindex-1 == engine slot (status id)
-static int kOffControllerHandleInPawn = 0xB80;
-// CCSBot AI object holds its pawn pointer
-static int kOffPawnInBot = 0x18;
+// pawn -> m_hController; controller entindex-1 == engine slot (status id)
+static int kOffControllerHandleInPawn = 0xBB0;
+// CBot base object holds its player pawn pointer
+static int kOffPlayerInBot = 0x18;
 static const int kMaxBots = 64;
 
-// pawn -> WeaponServices(0xA00) -> m_hActiveWeapon(0x60); weapon -> def index(0x9E0)
-static int kOffWeaponServicesInPawn = 0xA00;
+// pawn -> WeaponServices -> m_hActiveWeapon; weapon -> def index
+static int kOffWeaponServicesInPawn = 0xA30;
 static int kOffActiveWeaponInWs = 0x60;
-static int kOffItemDefIndexInWeapon = 0x9E0;
+static int kOffItemDefIndexInWeapon = 0xA00;
 static int kOffEntityIdentity = 0x10;
 static int kOffEHandleInIdentity = 0x10;
 
@@ -147,9 +148,87 @@ static std::atomic<long long> g_isVisiblePosCalls{0};    // times IsVisiblePos h
 static std::atomic<unsigned int> g_lastCtrlHandle{0};    // last raw controller handle read
 static std::atomic<unsigned long long> g_lastPawnPtr{0}; // last pawn ptr
 
+static std::atomic<long long> g_safeReadSceneFailures{0};
+static std::atomic<long long> g_safeReadBotFailures{0};
+static std::atomic<long long> g_safeReadWeaponFailures{0};
+static std::atomic<long long> g_safeReadBulletFailures{0};
+static std::atomic<long long> g_safeReadSmokeFailures{0};
+static std::atomic<long long> g_safeReadInstallFailures{0};
+
 static const char *kFuncName = "CBotManager::IsVisibleThroughSmoke";
 static const char *kHeadName = "g_AutoList_SmokeProj_Head_Server";
 static const char *kDensityFnName = "GetSmokeDensityInLine";
+
+// Checks that every page in a memory range is committed and readable
+static bool IsReadableMemory(const void *address, size_t size)
+{
+    if (!address || size == 0)
+        return false;
+
+    uintptr_t cursor = reinterpret_cast<uintptr_t>(address);
+    if (size > UINTPTR_MAX - cursor)
+        return false;
+    const uintptr_t end = cursor + size;
+
+    while (cursor < end)
+    {
+        MEMORY_BASIC_INFORMATION memoryInfo{};
+        if (VirtualQuery(reinterpret_cast<const void *>(cursor), &memoryInfo,
+                         sizeof(memoryInfo)) == 0)
+            return false;
+        if (memoryInfo.State != MEM_COMMIT ||
+            (memoryInfo.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+            return false;
+
+        const DWORD protection = memoryInfo.Protect & 0xFF;
+        const bool readable = protection == PAGE_READONLY ||
+                              protection == PAGE_READWRITE ||
+                              protection == PAGE_WRITECOPY ||
+                              protection == PAGE_EXECUTE_READ ||
+                              protection == PAGE_EXECUTE_READWRITE ||
+                              protection == PAGE_EXECUTE_WRITECOPY;
+        if (!readable)
+            return false;
+
+        const uintptr_t regionStart = reinterpret_cast<uintptr_t>(memoryInfo.BaseAddress);
+        if (memoryInfo.RegionSize > UINTPTR_MAX - regionStart)
+            return false;
+        const uintptr_t regionEnd = regionStart + memoryInfo.RegionSize;
+        if (regionEnd <= cursor)
+            return false;
+        cursor = regionEnd;
+    }
+    return true;
+}
+
+// Reads a value only after validating the source range and records failures
+template <typename T>
+static bool SafeRead(const void *base, size_t offset, T &out,
+                     std::atomic<long long> &failureCounter)
+{
+    if (!base)
+    {
+        failureCounter.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(base);
+    if (offset > UINTPTR_MAX - baseAddress)
+    {
+        failureCounter.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    const void *address = reinterpret_cast<const void *>(baseAddress + offset);
+    if (!IsReadableMemory(address, sizeof(T)))
+    {
+        failureCounter.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    std::memcpy(&out, address, sizeof(T));
+    return true;
+}
 
 // Current curtime
 static float NowTime()
@@ -293,12 +372,12 @@ static int ActiveWeaponDef(void *pawn)
 {
     if (!pawn || !g_pGetSlot)
         return -1;
-    void *ws = *reinterpret_cast<void **>(
-        reinterpret_cast<char *>(pawn) + kOffWeaponServicesInPawn);
-    if (!ws)
+    void *ws = nullptr;
+    if (!SafeRead(pawn, kOffWeaponServicesInPawn, ws, g_safeReadWeaponFailures) || !ws)
         return -1;
-    uint32_t activeH = *reinterpret_cast<uint32_t *>(
-        reinterpret_cast<char *>(ws) + kOffActiveWeaponInWs);
+    uint32_t activeH = 0;
+    if (!SafeRead(ws, kOffActiveWeaponInWs, activeH, g_safeReadWeaponFailures))
+        return -1;
     if (activeH == 0u || activeH == 0xFFFFFFFFu)
         return -1;
     int activeIdx = static_cast<int>(activeH & 0x7FFFu);
@@ -311,16 +390,19 @@ static int ActiveWeaponDef(void *pawn)
             void *w = g_pGetSlot(ws, slot, posArg);
             if (!w)
                 continue;
-            void *identity = *reinterpret_cast<void **>(
-                reinterpret_cast<char *>(w) + kOffEntityIdentity);
-            if (!identity)
+            void *identity = nullptr;
+            if (!SafeRead(w, kOffEntityIdentity, identity, g_safeReadWeaponFailures) || !identity)
                 continue;
-            uint32_t h = *reinterpret_cast<uint32_t *>(
-                reinterpret_cast<char *>(identity) + kOffEHandleInIdentity);
+            uint32_t h = 0;
+            if (!SafeRead(identity, kOffEHandleInIdentity, h, g_safeReadWeaponFailures))
+                continue;
             if ((static_cast<int>(h & 0x7FFFu)) != activeIdx)
                 continue;
-            return *reinterpret_cast<uint16_t *>(
-                reinterpret_cast<char *>(w) + kOffItemDefIndexInWeapon);
+            uint16_t itemDefinitionIndex = 0;
+            if (!SafeRead(w, kOffItemDefIndexInWeapon, itemDefinitionIndex,
+                          g_safeReadWeaponFailures))
+                return -1;
+            return itemDefinitionIndex;
         }
     }
     return -1;
@@ -335,8 +417,16 @@ static __int64 __fastcall HookedPelletTrace(
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
     if (a2 && a3)
     {
-        const float *src = reinterpret_cast<const float *>(a2);
-        const float *ang = reinterpret_cast<const float *>(a3); // QAngle{pitch,yaw,roll}
+        float srcValues[3]{};
+        float angValues[3]{};
+        if (!SafeRead(a2, 0, srcValues, g_safeReadBulletFailures) ||
+            !SafeRead(reinterpret_cast<const void *>(a3), 0, angValues,
+                      g_safeReadBulletFailures))
+            return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                     a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
+        const float *src = srcValues;
+        const float *ang = angValues; // QAngle{pitch,yaw,roll}
         // AngleVectors(ang) → fwd/right/up
         float pitch = ang[0] * 0.01745329252f, yaw = ang[1] * 0.01745329252f, roll = ang[2] * 0.01745329252f;
         float sp = std::sin(pitch), cp = std::cos(pitch);
@@ -363,7 +453,10 @@ static __int64 __fastcall HookedPelletTrace(
         }
 
         // Register a capsule hole
-        bool smokePresent = g_pAutoListHead && *g_pAutoListHead;
+        void *smokeHead = nullptr;
+        bool smokePresent = g_pAutoListHead &&
+                            SafeRead(g_pAutoListHead, 0, smokeHead, g_safeReadBulletFailures) &&
+                            smokeHead;
         if (g_bulletHolesEnabled.load(std::memory_order_relaxed) && g_pRayTrace && smokePresent)
         {
             g_traceAttempts.fetch_add(1, std::memory_order_relaxed);
@@ -372,8 +465,9 @@ static __int64 __fastcall HookedPelletTrace(
             {
                 // shooter pawn; also used to pick per-weapon radius
                 void *shooter = nullptr;
-                if (a1)
-                    shooter = *reinterpret_cast<void **>(a1 + 56);
+                if (a1 && !SafeRead(reinterpret_cast<const void *>(a1), 56, shooter,
+                                    g_safeReadBulletFailures))
+                    shooter = nullptr;
                 // resolve active weapon -> shotgun gets a wider hole
                 int def = ActiveWeaponDef(shooter);
                 bool isShotgun = IsShotgunDef(def);
@@ -413,10 +507,22 @@ static __int64 __fastcall HookedHeDetonate(void *self)
     if (self)
     {
         auto entity = reinterpret_cast<uintptr_t>(self);
-        uintptr_t node = *reinterpret_cast<uintptr_t *>(entity + kSceneNodeOffset);
+        uintptr_t bodyComponent = 0;
+        if (!SafeRead(reinterpret_cast<const void *>(entity), kBodyComponentOffset,
+                      bodyComponent, g_safeReadSceneFailures) ||
+            !bodyComponent)
+            return g_origHeDetonate(self);
+
+        uintptr_t node = 0;
+        if (!SafeRead(reinterpret_cast<const void *>(bodyComponent),
+                      kSceneNodeInBodyComponentOffset, node, g_safeReadSceneFailures))
+            return g_origHeDetonate(self);
         if (node)
         {
-            const float *origin = reinterpret_cast<const float *>(node + kAbsOriginOffset);
+            float origin[3]{};
+            if (!SafeRead(reinterpret_cast<const void *>(node), kAbsOriginOffset,
+                          origin, g_safeReadSceneFailures))
+                return g_origHeDetonate(self);
             cs2bv::hooks::OnHeDetonate(origin[0], origin[1], origin[2]);
         }
     }
@@ -428,13 +534,17 @@ static int BotSlotFromBot(__int64 bot)
 {
     if (!bot)
         return -1;
-    __int64 pawn = *reinterpret_cast<__int64 *>(
-        reinterpret_cast<char *>(bot) + kOffPawnInBot);
+    __int64 pawn = 0;
+    if (!SafeRead(reinterpret_cast<const void *>(bot), kOffPlayerInBot, pawn,
+                  g_safeReadBotFailures))
+        return -1;
     g_lastPawnPtr.store(static_cast<unsigned long long>(pawn), std::memory_order_relaxed);
     if (!pawn)
         return -1;
-    uint32_t h = *reinterpret_cast<uint32_t *>(
-        reinterpret_cast<char *>(pawn) + kOffControllerHandleInPawn);
+    uint32_t h = 0;
+    if (!SafeRead(reinterpret_cast<const void *>(pawn), kOffControllerHandleInPawn, h,
+                  g_safeReadBotFailures))
+        return -1;
     g_lastCtrlHandle.store(h, std::memory_order_relaxed); // probe: raw handle
     if (h == 0u || h == 0xFFFFFFFFu)
         return -1;
@@ -471,8 +581,13 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
 
     if (!g_fnGetSmokeDensityInLine)
         return g_origIsVisibleThroughSmoke(self, from, to);
-    const float *fa = static_cast<const float *>(from);
-    const float *fb = static_cast<const float *>(to);
+    float fromValues[3]{};
+    float toValues[3]{};
+    if (!SafeRead(from, 0, fromValues, g_safeReadSmokeFailures) ||
+        !SafeRead(to, 0, toValues, g_safeReadSmokeFailures))
+        return g_origIsVisibleThroughSmoke(self, from, to);
+    const float *fa = fromValues;
+    const float *fb = toValues;
     float dens = g_fnGetSmokeDensityInLine(fa, fb, nullptr);
     // Per-bot threshold
     int thrMilli = g_densityThrMilli.load(std::memory_order_relaxed);
@@ -517,7 +632,10 @@ namespace cs2bv::hooks
     {
         if (!sigStart || relOffset <= 0 || instLen < relOffset + 4)
             return nullptr;
-        int32_t disp = *reinterpret_cast<int32_t *>(sigStart + relOffset);
+        int32_t disp = 0;
+        if (!SafeRead(sigStart, static_cast<size_t>(relOffset), disp,
+                      g_safeReadInstallFailures))
+            return nullptr;
         return sigStart + instLen + disp;
     }
 
@@ -595,13 +713,16 @@ namespace cs2bv::hooks
 
         // Load class-member offsets (fall back to built-in defaults if absent)
         using cs2bv::sig::ResolveOffset;
-        kSceneNodeOffset = ResolveOffset(gamedata, "CBaseEntity::m_pGameSceneNode", kSceneNodeOffset);
+        kBodyComponentOffset = ResolveOffset(gamedata, "CBaseEntity::m_CBodyComponent", kBodyComponentOffset);
+        kSceneNodeInBodyComponentOffset = ResolveOffset(
+            gamedata, "CBodyComponent::m_pSceneNode", kSceneNodeInBodyComponentOffset);
         kAbsOriginOffset = ResolveOffset(gamedata, "CGameSceneNode::m_vecAbsOrigin", kAbsOriginOffset);
         kOffControllerHandleInPawn = ResolveOffset(gamedata, "CBasePlayerPawn::m_hController", kOffControllerHandleInPawn);
-        kOffPawnInBot = ResolveOffset(gamedata, "CCSBot::m_pPawn", kOffPawnInBot);
+        kOffPlayerInBot = ResolveOffset(gamedata, "Bot::m_pPlayer", kOffPlayerInBot);
         kOffWeaponServicesInPawn = ResolveOffset(gamedata, "CBasePlayerPawn::m_pWeaponServices", kOffWeaponServicesInPawn);
         kOffActiveWeaponInWs = ResolveOffset(gamedata, "CPlayer_WeaponServices::m_hActiveWeapon", kOffActiveWeaponInWs);
-        kOffItemDefIndexInWeapon = ResolveOffset(gamedata, "CEconItemView::m_iItemDefinitionIndex", kOffItemDefIndexInWeapon);
+        kOffItemDefIndexInWeapon = ResolveOffset(
+            gamedata, "CBasePlayerWeapon::m_iItemDefinitionIndex", kOffItemDefIndexInWeapon);
         kOffEntityIdentity = ResolveOffset(gamedata, "CEntityInstance::m_pEntity", kOffEntityIdentity);
         kOffEHandleInIdentity = kOffEntityIdentity; // same 0x10 slot
 
@@ -639,7 +760,6 @@ namespace cs2bv::hooks
             ReportError(error, maxlen, "funchook_install failed for %s", kFuncName);
             return false;
         }
-
 
         // Resolve GetSmokeDensityInLine
         {
@@ -783,6 +903,21 @@ namespace cs2bv::hooks
     void SetDensityThreshold(float v) { g_densityThrMilli.store((int)(v * 1000), std::memory_order_relaxed); }
     float GetDensityThreshold() { return g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f; }
     bool IsDensityFnResolved() { return g_fnGetSmokeDensityInLine != nullptr; }
+
+    // Formats safe-read failure counters by runtime subsystem
+    const char *GetSafeReadDiag()
+    {
+        static char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "scene=%lld bot=%lld weapon=%lld bullet=%lld smoke=%lld install=%lld",
+                      static_cast<long long>(g_safeReadSceneFailures.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_safeReadBotFailures.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_safeReadWeaponFailures.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_safeReadBulletFailures.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_safeReadSmokeFailures.load(std::memory_order_relaxed)),
+                      static_cast<long long>(g_safeReadInstallFailures.load(std::memory_order_relaxed)));
+        return buf;
+    }
 
     // Per-bot density threshold
     void SetBotDensityThreshold(int slot, float v)

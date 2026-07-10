@@ -19,15 +19,15 @@
   "GetSmokeDensityInLine": {
     "signatures": {
       "library": "server",
-      "windows": "40 55 53 56 41 54 41 56",
+      "windows": "40 55 53 56 41 55 41 57 48 8D 6C 24",
       "linux": ""
     },
-    "comment": "smoke-density integrator."
+    "comment": "float GetSmokeDensityInLine(const VectorWS& from, const VectorWS& to, VectorWS* outClosest)."
   },
   "CHEGrenadeProjectile::Detonate": {
     "signatures": {
       "library": "server",
-      "windows": "48 8B C4 55 41 55 48 8D 68 ? 48 81 EC ? ? ? ? 48 89 58",
+      "windows": "48 8B C4 55 57 48 8D 68 ? 48 81 EC ? ? ? ? 48 89 58 ? 48 89 70",
       "linux": ""
     },
     "comment": "HE detonate."
@@ -35,7 +35,7 @@
   "BulletPelletTrace": {
     "signatures": {
       "library": "server",
-      "windows": "48 89 54 24 ? 55 56 41 57",
+      "windows": "48 89 54 24 ? 55 56 41 57 48 8D AC 24 ? ? ? ? B8",
       "linux": ""
     },
     "comment": "Per-pellet bullet trace."
@@ -56,12 +56,19 @@
     },
     "comment": "CCSBot::IsVisible(pos)."
   },
-  "CBaseEntity::m_pGameSceneNode": {
+  "CBaseEntity::m_CBodyComponent": {
     "offsets": {
-      "windows": 624,
+      "windows": 48,
       "linux": 0
     },
-    "comment": "CBaseEntity -> CGameSceneNode*."
+    "comment": "CBaseEntity -> CBodyComponent* (0x30)."
+  },
+  "CBodyComponent::m_pSceneNode": {
+    "offsets": {
+      "windows": 8,
+      "linux": 0
+    },
+    "comment": "CBodyComponent -> CGameSceneNode* (0x8)."
   },
   "CGameSceneNode::m_vecAbsOrigin": {
     "offsets": {
@@ -72,21 +79,21 @@
   },
   "CBasePlayerPawn::m_hController": {
     "offsets": {
-      "windows": 2944,
+      "windows": 2992,
       "linux": 0
     },
     "comment": "pawn -> controller handle (0xB80)."
   },
-  "CCSBot::m_pPawn": {
+  "Bot::m_pPlayer": {
     "offsets": {
       "windows": 24,
       "linux": 0
     },
-    "comment": "CCSBot AI object -> pawn ptr (0x18)."
+    "comment": "CBot base object -> player pawn ptr (0x18)."
   },
   "CBasePlayerPawn::m_pWeaponServices": {
     "offsets": {
-      "windows": 2560,
+      "windows": 2608,
       "linux": 0
     },
     "comment": "pawn -> WeaponServices (0xA00)."
@@ -98,12 +105,12 @@
     },
     "comment": "WeaponServices -> active weapon handle (0x60)."
   },
-  "CEconItemView::m_iItemDefinitionIndex": {
+  "CBasePlayerWeapon::m_iItemDefinitionIndex": {
     "offsets": {
-      "windows": 2528,
+      "windows": 2560,
       "linux": 0
     },
-    "comment": "weapon -> item def index (0x9E0)."
+    "comment": "Flattened weapon-relative item definition index (0xA00)."
   },
   "CEntityInstance::m_pEntity": {
     "offsets": {

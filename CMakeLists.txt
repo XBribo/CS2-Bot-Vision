@@ -124,5 +124,12 @@ set_target_properties(BotVision PROPERTIES OUTPUT_NAME "BotVision" PREFIX "" SUF
 
 if(MSVC)
     target_compile_options(BotVision PRIVATE
-        /W3 /permissive- /wd4819 /wd4267 /wd4244 /wd4146 /wd4996 /wd4661)
+        /W3 /permissive-
+        /utf-8   # UTF-8
+        /wd4267  # size_t -> int conversion
+        /wd4244  # narrowing conversion
+        /wd4146  # unary minus on unsigned
+        /wd4996  # deprecated CRT
+        /wd4661  # template instantiation needed
+    )
 endif()

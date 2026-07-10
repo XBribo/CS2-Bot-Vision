@@ -55,6 +55,8 @@ namespace cs2bv::hooks
     void SetDensityThreshold(float v);
     float GetDensityThreshold();
     bool IsDensityFnResolved();
+    // Formats safe-read failure counters for runtime diagnostics
+    const char *GetSafeReadDiag();
 
     // Per-bot density threshold
     void SetBotDensityThreshold(int slot, float v);

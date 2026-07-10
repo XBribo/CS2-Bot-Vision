@@ -58,6 +58,9 @@ CON_COMMAND_F(bv_status,
     cs2bv::commands::PrintToCaller(context,
                                    "[BotVision] bulletDiag: %s\n",
                                    cs2bv::hooks::GetBulletDiag());
+    cs2bv::commands::PrintToCaller(context,
+                                   "[BotVision] safeReadFailures: %s\n",
+                                   cs2bv::hooks::GetSafeReadDiag());
 }
 
 CON_COMMAND_F(bv_test_los,
