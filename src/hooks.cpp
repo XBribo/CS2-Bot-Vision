@@ -652,6 +652,85 @@ namespace cs2bv::hooks
         return vit->get<int>();
     }
 
+    // Resolve a function whose first rel32 jump bytes were replaced by another detour
+    static void *ResolveSigWithRel32DetourFallback(const nlohmann::json &gamedata,
+                                                   const cs2bv::sig::ModuleInfo &module,
+                                                   const char *name, bool &usedFallback,
+                                                   char *errorOut, size_t errorOutLen)
+    {
+        usedFallback = false;
+
+        char primaryError[256] = {0};
+        void *target = cs2bv::sig::ResolveSig(
+            gamedata, module, name, primaryError, sizeof(primaryError));
+        if (target)
+            return target;
+
+        std::string sigStr = cs2bv::sig::FindPlatformSig(gamedata, name);
+        std::vector<uint8_t> pattern;
+        std::vector<bool> wild;
+        constexpr size_t kRel32JumpSize = 5;
+        if (sigStr.empty() || !cs2bv::sig::ParseSigString(sigStr, pattern, wild) ||
+            pattern.size() <= kRel32JumpSize)
+        {
+            if (errorOut && errorOutLen > 0)
+                std::snprintf(errorOut, errorOutLen, "%s", primaryError);
+            return nullptr;
+        }
+
+        void *resolved = nullptr;
+        size_t matchCount = 0;
+        const size_t tailSize = pattern.size() - kRel32JumpSize;
+        for (const cs2bv::sig::ModuleSegment &segment : module.Segments)
+        {
+            if (!segment.Base || segment.Size < pattern.size())
+                continue;
+
+            for (size_t i = kRel32JumpSize; i + tailSize <= segment.Size; ++i)
+            {
+                bool matches = true;
+                for (size_t j = 0; j < tailSize; ++j)
+                {
+                    const size_t patternIndex = kRel32JumpSize + j;
+                    if (!wild[patternIndex] &&
+                        segment.Base[i + j] != pattern[patternIndex])
+                    {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (!matches)
+                    continue;
+
+                unsigned char *candidate = segment.Base + i - kRel32JumpSize;
+                if (candidate[0] != 0xE9)
+                    continue;
+
+                int32_t displacement = 0;
+                std::memcpy(&displacement, candidate + 1, sizeof(displacement));
+                void *detourTarget = candidate + kRel32JumpSize + displacement;
+                if (!IsReadableMemory(detourTarget, 1))
+                    continue;
+
+                resolved = candidate;
+                ++matchCount;
+            }
+        }
+
+        if (matchCount == 1)
+        {
+            usedFallback = true;
+            return resolved;
+        }
+
+        if (errorOut && errorOutLen > 0)
+        {
+            std::snprintf(errorOut, errorOutLen,
+                          "%s; rel32 detour tail matches=%zu", primaryError, matchCount);
+        }
+        return nullptr;
+    }
+
     // Resolve g_AutoList_SmokeProj_Head_Server
     static void TryResolveAutoListHead(const nlohmann::json &gamedata,
                                        const cs2bv::sig::ModuleInfo &serverMod)
@@ -856,7 +935,9 @@ namespace cs2bv::hooks
         // Resolve + hook CCSBot::IsVisible(pos)
         {
             char ivErr[256] = {0};
-            void *ivTarget = cs2bv::sig::ResolveSig(gamedata, server, kIsVisiblePosName, ivErr, sizeof(ivErr));
+            bool chainedDetour = false;
+            void *ivTarget = ResolveSigWithRel32DetourFallback(
+                gamedata, server, kIsVisiblePosName, chainedDetour, ivErr, sizeof(ivErr));
             if (ivTarget &&
                 g_dIsVisiblePos.Create(ivTarget, reinterpret_cast<void *>(&HookedIsVisiblePos),
                                        reinterpret_cast<void **>(&g_origIsVisiblePos)) &&
@@ -864,7 +945,9 @@ namespace cs2bv::hooks
             {
                 char iv[160];
                 std::snprintf(iv, sizeof(iv),
-                              "[BotVision] %s @ %p (per-bot density active)\n", kIsVisiblePosName, ivTarget);
+                              "[BotVision] %s @ %p (per-bot density active%s)\n",
+                              kIsVisiblePosName, ivTarget,
+                              chainedDetour ? ", chained existing detour" : "");
                 OutputDebugStringA(iv);
             }
             else
