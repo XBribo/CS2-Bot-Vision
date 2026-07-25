@@ -53,7 +53,7 @@ static std::atomic<int> g_bulletRadiusMilli{12000};        // bv_bullet_radius *
 static std::atomic<int> g_bulletRadiusShotgunMilli{28000}; // bv_bullet_radius_shotgun * 1000 (default 28)
 static std::atomic<int> g_bulletDurationMilli{150};        // bv_bullet_duration * 1000 (default 0.15s)
 static std::atomic<int> g_bulletRangeMilli{8192000};       // bv_bullet_range * 1000 (default 8192)
-static std::atomic<int> g_bulletHolesEnabled{1};           // bv_bullet_holes (default on)
+static std::atomic<int> g_bulletHolesEnabled{0};           // bv_bullet_holes (default off)
 static std::string g_heListenerStatus = "not_attempted";   // hegrenade_detonate registration result
 
 using IsVisibleThroughSmoke_t = bool(__fastcall *)(void *self, const void *from, const void *to);
@@ -415,6 +415,10 @@ static __int64 __fastcall HookedPelletTrace(
     __int64 a15, __int64 a16, int a17, int a18, void *a19, __int64 a20)
 {
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
+    if (!g_bulletHolesEnabled.load(std::memory_order_relaxed))
+        return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                 a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
     if (a2 && a3)
     {
         float srcValues[3]{};
@@ -457,7 +461,7 @@ static __int64 __fastcall HookedPelletTrace(
         bool smokePresent = g_pAutoListHead &&
                             SafeRead(g_pAutoListHead, 0, smokeHead, g_safeReadBulletFailures) &&
                             smokeHead;
-        if (g_bulletHolesEnabled.load(std::memory_order_relaxed) && g_pRayTrace && smokePresent)
+        if (g_pRayTrace && smokePresent)
         {
             g_traceAttempts.fetch_add(1, std::memory_order_relaxed);
             float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
@@ -603,7 +607,8 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
     {
         if (SegmentClearedByHeHole(fa, fb))
             return true;
-        if (SegmentClearedByBulletHole(fa, fb))
+        if (g_bulletHolesEnabled.load(std::memory_order_relaxed) &&
+            SegmentClearedByBulletHole(fa, fb))
             return true;
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -1186,7 +1191,8 @@ namespace cs2bv::hooks
         float thr = g_densityThrMilli.load(std::memory_order_relaxed) * 0.001f;
         bool engineBlock = dens >= thr;
         bool heCleared = SegmentClearedByHeHole(from, to);
-        bool bulletCleared = SegmentClearedByBulletHole(from, to);
+        bool bulletCleared = g_bulletHolesEnabled.load(std::memory_order_relaxed) &&
+                             SegmentClearedByBulletHole(from, to);
         bool finalBlock = engineBlock && !heCleared && !bulletCleared;
         written += std::snprintf(buf + written, buflen - written,
                                  "density=%.4f  threshold=%.4f  engineBlock=%d  heCleared=%d  bulletCleared=%d  blocked=%d  activeHoles=%d\n",
