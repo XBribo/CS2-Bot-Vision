@@ -139,14 +139,30 @@ static std::atomic<int> g_smokeMode{0};
 static std::atomic<int> g_densityThrMilli{200}; // bv_density_threshold * 1000 (default 0.2 → 200)
 
 // Per-bot density threshold (indexed by engine slot 0..63). INT_MIN = use global default.
-// Stamped by the IsVisiblePos hook, read by the smoke hook on the same thread.
+// The active override is stamped by IsVisiblePos and read by the smoke hook on the same thread.
 static const int kSlotDefault = INT_MIN;
 static std::atomic<int> g_botThrMilli[kMaxBots];
-static thread_local int g_curBotSlot = -1;               // slot of the bot currently querying (-1 = none/non-bot)
-static std::atomic<int> g_lastBotSlot{-1};               // last slot seen by IsVisiblePos
+static std::atomic<int> g_botThresholdOverrideCount{0};
+static std::atomic<unsigned int> g_botThresholdCacheGeneration{1};
+static thread_local int g_curBotThresholdMilli = kSlotDefault;
+static std::atomic<int> g_lastBotSlot{-1};               // last slot resolved by IsVisiblePos
 static std::atomic<long long> g_isVisiblePosCalls{0};    // times IsVisiblePos hook fired
 static std::atomic<unsigned int> g_lastCtrlHandle{0};    // last raw controller handle read
 static std::atomic<unsigned long long> g_lastPawnPtr{0}; // last pawn ptr
+
+struct BotThresholdCacheEntry
+{
+    __int64 bot = 0;
+    int thresholdMilli = kSlotDefault;
+    unsigned int usesRemaining = 0;
+    unsigned int generation = 0;
+};
+
+static const size_t kBotThresholdCacheSize = 256;
+static const size_t kBotThresholdCacheProbeCount = 4;
+static const unsigned int kBotThresholdCacheRefreshUses = 1024;
+static const unsigned int kInvalidBotThresholdCacheRefreshUses = 32;
+static thread_local BotThresholdCacheEntry g_botThresholdCache[kBotThresholdCacheSize];
 
 static std::atomic<long long> g_safeReadSceneFailures{0};
 static std::atomic<long long> g_safeReadBotFailures{0};
@@ -556,20 +572,90 @@ static int BotSlotFromBot(__int64 bot)
     int slot = ctrlIdx - 1; // controller entindex is slot+1
     if (slot < 0 || slot >= kMaxBots)
         return -1;
+    g_lastBotSlot.store(slot, std::memory_order_relaxed);
     return slot;
+}
+
+// Mixes aligned bot pointers before indexing the fixed-size cache
+static size_t BotThresholdCacheIndex(__int64 bot)
+{
+    uint64_t key = static_cast<uint64_t>(bot);
+    key ^= key >> 33;
+    key *= 0xff51afd7ed558ccdULL;
+    key ^= key >> 33;
+    return static_cast<size_t>(key) & (kBotThresholdCacheSize - 1);
+}
+
+// Returns a cached bot threshold and periodically revalidates the pointer chain
+static int CachedBotThresholdFromBot(__int64 bot)
+{
+    if (!bot)
+        return kSlotDefault;
+
+    unsigned int generation = g_botThresholdCacheGeneration.load(std::memory_order_relaxed);
+    size_t index = BotThresholdCacheIndex(bot);
+    BotThresholdCacheEntry *replacement = &g_botThresholdCache[index];
+    for (size_t probe = 0; probe < kBotThresholdCacheProbeCount; ++probe)
+    {
+        BotThresholdCacheEntry &entry =
+            g_botThresholdCache[(index + probe) & (kBotThresholdCacheSize - 1)];
+        if (entry.bot == bot && entry.generation == generation)
+        {
+            if (entry.usesRemaining > 0)
+            {
+                --entry.usesRemaining;
+                return entry.thresholdMilli;
+            }
+            replacement = &entry;
+            break;
+        }
+        if (entry.generation != generation || entry.bot == 0)
+        {
+            replacement = &entry;
+            break;
+        }
+        if (entry.usesRemaining < replacement->usesRemaining)
+            replacement = &entry;
+    }
+
+    int slot = BotSlotFromBot(bot);
+    int thresholdMilli = slot >= 0
+                             ? g_botThrMilli[slot].load(std::memory_order_relaxed)
+                             : kSlotDefault;
+    replacement->bot = bot;
+    replacement->thresholdMilli = thresholdMilli;
+    replacement->usesRemaining = slot >= 0
+                                     ? kBotThresholdCacheRefreshUses
+                                     : kInvalidBotThresholdCacheRefreshUses;
+    replacement->generation = generation;
+    return thresholdMilli;
 }
 
 // CCSBot::IsVisible(pos)
 static __int64 __fastcall HookedIsVisiblePos(__int64 self, __int64 pos, char testFOV, void *ent)
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed); // probe: hook fired
-    int prev = g_curBotSlot;
-    int slot = BotSlotFromBot(self);
-    g_curBotSlot = slot;
-    if (slot >= 0)
-        g_lastBotSlot.store(slot, std::memory_order_relaxed);
+    if (g_smokeMode.load(std::memory_order_relaxed) == 1 ||
+        g_botThresholdOverrideCount.load(std::memory_order_relaxed) == 0)
+        return g_origIsVisiblePos(self, pos, testFOV, ent);
+
+    int botThresholdMilli = CachedBotThresholdFromBot(self);
+    if (botThresholdMilli == kSlotDefault)
+    {
+        if (g_curBotThresholdMilli == kSlotDefault)
+            return g_origIsVisiblePos(self, pos, testFOV, ent);
+
+        int previousThresholdMilli = g_curBotThresholdMilli;
+        g_curBotThresholdMilli = kSlotDefault;
+        __int64 ret = g_origIsVisiblePos(self, pos, testFOV, ent);
+        g_curBotThresholdMilli = previousThresholdMilli;
+        return ret;
+    }
+
+    int previousThresholdMilli = g_curBotThresholdMilli;
+    g_curBotThresholdMilli = botThresholdMilli;
     __int64 ret = g_origIsVisiblePos(self, pos, testFOV, ent);
-    g_curBotSlot = prev;
+    g_curBotThresholdMilli = previousThresholdMilli;
     return ret;
 }
 
@@ -595,13 +681,8 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void *self, const void *from,
     float dens = g_fnGetSmokeDensityInLine(fa, fb, nullptr);
     // Per-bot threshold
     int thrMilli = g_densityThrMilli.load(std::memory_order_relaxed);
-    int slot = g_curBotSlot;
-    if (slot >= 0 && slot < kMaxBots)
-    {
-        int botThr = g_botThrMilli[slot].load(std::memory_order_relaxed);
-        if (botThr != kSlotDefault)
-            thrMilli = botThr;
-    }
+    if (g_curBotThresholdMilli != kSlotDefault)
+        thrMilli = g_curBotThresholdMilli;
     float thr = thrMilli * 0.001f;
     if (dens >= thr)
     {
@@ -787,6 +868,8 @@ namespace cs2bv::hooks
         // Per-bot thresholds start unset
         for (int i = 0; i < kMaxBots; ++i)
             g_botThrMilli[i].store(kSlotDefault, std::memory_order_relaxed);
+        g_botThresholdOverrideCount.store(0, std::memory_order_relaxed);
+        g_botThresholdCacheGeneration.fetch_add(1, std::memory_order_relaxed);
 
         nlohmann::json gamedata;
         if (!cs2bv::sig::LoadGamedata(gamedataPath.c_str(), gamedata))
@@ -1012,10 +1095,17 @@ namespace cs2bv::hooks
     {
         if (slot < 0 || slot >= kMaxBots)
             return;
-        if (v < 0.0f)
-            g_botThrMilli[slot].store(kSlotDefault, std::memory_order_relaxed);
-        else
-            g_botThrMilli[slot].store((int)(v * 1000), std::memory_order_relaxed);
+
+        int next = v < 0.0f ? kSlotDefault : (int)(v * 1000);
+        int previous = g_botThrMilli[slot].exchange(next, std::memory_order_relaxed);
+        if (previous == next)
+            return;
+
+        if (previous == kSlotDefault && next != kSlotDefault)
+            g_botThresholdOverrideCount.fetch_add(1, std::memory_order_relaxed);
+        else if (previous != kSlotDefault && next == kSlotDefault)
+            g_botThresholdOverrideCount.fetch_sub(1, std::memory_order_relaxed);
+        g_botThresholdCacheGeneration.fetch_add(1, std::memory_order_relaxed);
     }
     // Returns slot's threshold, or -1 if unset
     float GetBotDensityThreshold(int slot)

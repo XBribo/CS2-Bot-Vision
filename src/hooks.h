@@ -62,7 +62,7 @@ namespace cs2bv::hooks
     void SetBotDensityThreshold(int slot, float v);
     float GetBotDensityThreshold(int slot); // -1 if unset
     int GetMaxBots();
-    int GetLastBotSlot();                // last slot seen by IsVisiblePos hook (-1 = none)
+    int GetLastBotSlot();                // last slot resolved by IsVisiblePos hook (-1 = none)
     bool IsVisiblePosHooked();           // false = per-bot density unavailable
     long long GetIsVisiblePosCalls();    // probe: times the hook fired
     unsigned int GetLastCtrlHandle();    // probe: last raw controller handle read
