@@ -63,7 +63,6 @@ FetchContent_MakeAvailable(funchook)
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
-    ${HL2SDK}/tier1/generichash.cpp
     ${HL2SDK}/tier1/keyvalues3.cpp
     ${HL2SDK}/tier1/convar.cpp
     ${MMS}/core/sourcehook/sourcehook.cpp
@@ -104,7 +103,6 @@ set(HL2SDK_LIBDIR ${HL2SDK}/lib/public/win64)
 target_link_libraries(BotVision PRIVATE
     funchook-static psapi
     ${HL2SDK_LIBDIR}/tier0.lib
-    ${HL2SDK_LIBDIR}/tier1.lib
     ${HL2SDK_LIBDIR}/mathlib.lib
     ${HL2SDK_LIBDIR}/interfaces.lib
     ${HL2SDK_LIBDIR}/2015/libprotobuf.lib

@@ -34,7 +34,7 @@ public:
     const char *GetDescription() override { return "Volumetric smoke bots."; }
     const char *GetURL() override { return ""; }
     const char *GetLicense() override { return "AGPL3.0"; }
-    const char *GetVersion() override { return "0.1.6"; }
+    const char *GetVersion() override { return "0.1.7"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BV"; }
 };

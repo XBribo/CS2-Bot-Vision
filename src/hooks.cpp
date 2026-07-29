@@ -53,7 +53,7 @@ static std::atomic<int> g_bulletRadiusMilli{12000};        // bv_bullet_radius *
 static std::atomic<int> g_bulletRadiusShotgunMilli{28000}; // bv_bullet_radius_shotgun * 1000 (default 28)
 static std::atomic<int> g_bulletDurationMilli{150};        // bv_bullet_duration * 1000 (default 0.15s)
 static std::atomic<int> g_bulletRangeMilli{8192000};       // bv_bullet_range * 1000 (default 8192)
-static std::atomic<int> g_bulletHolesEnabled{0};           // bv_bullet_holes (default off)
+static std::atomic<int> g_bulletHolesEnabled{1};           // bv_bullet_holes (default on)
 static std::string g_heListenerStatus = "not_attempted";   // hegrenade_detonate registration result
 
 using IsVisibleThroughSmoke_t = bool(__fastcall *)(void *self, const void *from, const void *to);
@@ -111,6 +111,16 @@ static bool IsShotgunDef(int def)
 // Probe state: last active-weapon def seen by the pellet hook
 static std::atomic<int> g_lastWeaponDef{-1};
 static std::atomic<int> g_lastWeaponShotgun{0};
+
+struct WeaponDefCacheEntry
+{
+    void *shooter = nullptr;
+    float sampleTime = -1.0f;
+    int definitionIndex = -1;
+};
+
+static const size_t kWeaponDefCacheSize = 64;
+static thread_local WeaponDefCacheEntry g_weaponDefCache[kWeaponDefCacheSize];
 
 // Verification state
 static std::atomic<long long> g_bulletCount{0};
@@ -253,6 +263,16 @@ static float NowTime()
         return 0.0f;
     CGlobalVars *gv = g_pEngine->GetServerGlobals();
     return gv ? gv->curtime : 0.0f;
+}
+
+// Mixes an aligned pointer value for fixed-size cache indexing
+static uint64_t MixPointerValue(uintptr_t value)
+{
+    uint64_t key = static_cast<uint64_t>(value);
+    key ^= key >> 33;
+    key *= 0xff51afd7ed558ccdULL;
+    key ^= key >> 33;
+    return key;
 }
 
 // Shortest squared distance from point p to segment a->b
@@ -424,6 +444,27 @@ static int ActiveWeaponDef(void *pawn)
     return -1;
 }
 
+// Caches the shooter weapon definition for all pellets fired in the same server time
+static int CachedActiveWeaponDef(void *shooter)
+{
+    if (!shooter)
+        return -1;
+
+    float sampleTime = NowTime();
+    size_t index = static_cast<size_t>(
+                       MixPointerValue(reinterpret_cast<uintptr_t>(shooter))) &
+                   (kWeaponDefCacheSize - 1);
+    WeaponDefCacheEntry &entry = g_weaponDefCache[index];
+    if (sampleTime > 0.0f && entry.shooter == shooter && entry.sampleTime == sampleTime)
+        return entry.definitionIndex;
+
+    int definitionIndex = ActiveWeaponDef(shooter);
+    entry.shooter = shooter;
+    entry.sampleTime = sampleTime;
+    entry.definitionIndex = definitionIndex;
+    return definitionIndex;
+}
+
 // Per-pellet trace
 static __int64 __fastcall HookedPelletTrace(
     __int64 a1, void *a2, __int64 a3, float a4, float a5, int a6, unsigned char a7,
@@ -431,92 +472,88 @@ static __int64 __fastcall HookedPelletTrace(
     __int64 a15, __int64 a16, int a17, int a18, void *a19, __int64 a20)
 {
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
-    if (!g_bulletHolesEnabled.load(std::memory_order_relaxed))
+    if (!g_bulletHolesEnabled.load(std::memory_order_relaxed) ||
+        g_smokeMode.load(std::memory_order_relaxed) == 1 ||
+        !g_pRayTrace || !g_pAutoListHead || !*g_pAutoListHead || !a2 || !a3)
         return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
                                  a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
 
-    if (a2 && a3)
+    float srcValues[3]{};
+    float angValues[3]{};
+    if (!SafeRead(a2, 0, srcValues, g_safeReadBulletFailures) ||
+        !SafeRead(reinterpret_cast<const void *>(a3), 0, angValues,
+                  g_safeReadBulletFailures))
+        return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                 a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
+    const float *src = srcValues;
+    const float *ang = angValues; // QAngle{pitch,yaw,roll}
+    // AngleVectors(ang) → fwd/right/up
+    float pitch = ang[0] * 0.01745329252f, yaw = ang[1] * 0.01745329252f, roll = ang[2] * 0.01745329252f;
+    float sp = std::sin(pitch), cp = std::cos(pitch);
+    float sy = std::sin(yaw), cy = std::cos(yaw);
+    float sr = std::sin(roll), cr = std::cos(roll);
+    float fwd[3] = {cp * cy, cp * sy, -sp};
+    float right[3] = {-1.f * sr * sp * cy + -1.f * cr * -sy,
+                      -1.f * sr * sp * sy + -1.f * cr * cy,
+                      -1.f * sr * cp};
+    float up[3] = {cr * sp * cy + -sr * -sy, cr * sp * sy + -sr * cy, cr * cp};
+    // pellet direction: dir = fwd - right*a13 + up*a14
+    float dir[3] = {fwd[0] - right[0] * a13 + up[0] * a14,
+                    fwd[1] - right[1] * a13 + up[1] * a14,
+                    fwd[2] - right[2] * a13 + up[2] * a14};
+    float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (len <= 1e-4f)
+        return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                 a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
+    float range = g_bulletRangeMilli.load(std::memory_order_relaxed) * 0.001f;
+    float inv = range / len;
+    cs2bv::rt::Vector start{src[0], src[1], src[2]};
+    cs2bv::rt::Vector end{src[0] + dir[0] * inv, src[1] + dir[1] * inv, src[2] + dir[2] * inv};
+    float fullEnd[3] = {end.x, end.y, end.z};
+    if (g_fnGetSmokeDensityInLine &&
+        g_fnGetSmokeDensityInLine(src, fullEnd, nullptr) <= 0.0f)
+        return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                 a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
+    void *shooter = nullptr;
+    if (a1 && !SafeRead(reinterpret_cast<const void *>(a1), 56, shooter,
+                        g_safeReadBulletFailures))
+        shooter = nullptr;
+
+    g_traceAttempts.fetch_add(1, std::memory_order_relaxed);
+    cs2bv::rt::TraceOptions opts; // default InteractsWith = MASK_SHOT_PHYSICS
+    cs2bv::rt::TraceResult res;
+    bool traceHit = g_pRayTrace->TraceEndShape(&start, &end, shooter, &opts, &res);
+    float endp[3] = {traceHit ? res.EndPos.x : end.x,
+                     traceHit ? res.EndPos.y : end.y,
+                     traceHit ? res.EndPos.z : end.z};
+    if (traceHit)
+        g_traceHits.fetch_add(1, std::memory_order_relaxed);
+    if (traceHit && g_fnGetSmokeDensityInLine &&
+        g_fnGetSmokeDensityInLine(src, endp, nullptr) <= 0.0f)
+        return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                 a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+
+    int def = CachedActiveWeaponDef(shooter);
+    bool isShotgun = IsShotgunDef(def);
+    float radius = (isShotgun ? g_bulletRadiusShotgunMilli : g_bulletRadiusMilli)
+                       .load(std::memory_order_relaxed) *
+                   0.001f;
+    cs2bv::hooks::OnBulletHole(src, endp, radius);
+    g_lastWeaponDef.store(def, std::memory_order_relaxed);
+    g_lastWeaponShotgun.store(isShotgun ? 1 : 0, std::memory_order_relaxed);
     {
-        float srcValues[3]{};
-        float angValues[3]{};
-        if (!SafeRead(a2, 0, srcValues, g_safeReadBulletFailures) ||
-            !SafeRead(reinterpret_cast<const void *>(a3), 0, angValues,
-                      g_safeReadBulletFailures))
-            return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
-                                     a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
-
-        const float *src = srcValues;
-        const float *ang = angValues; // QAngle{pitch,yaw,roll}
-        // AngleVectors(ang) → fwd/right/up
-        float pitch = ang[0] * 0.01745329252f, yaw = ang[1] * 0.01745329252f, roll = ang[2] * 0.01745329252f;
-        float sp = std::sin(pitch), cp = std::cos(pitch);
-        float sy = std::sin(yaw), cy = std::cos(yaw);
-        float sr = std::sin(roll), cr = std::cos(roll);
-        float fwd[3] = {cp * cy, cp * sy, -sp};
-        float right[3] = {-1.f * sr * sp * cy + -1.f * cr * -sy,
-                          -1.f * sr * sp * sy + -1.f * cr * cy,
-                          -1.f * sr * cp};
-        float up[3] = {cr * sp * cy + -sr * -sy, cr * sp * sy + -sr * cy, cr * cp};
-        // pellet direction: dir = fwd - right*a13 + up*a14
-        float dir[3] = {fwd[0] - right[0] * a13 + up[0] * a14,
-                        fwd[1] - right[1] * a13 + up[1] * a14,
-                        fwd[2] - right[2] * a13 + up[2] * a14};
-
+        std::lock_guard<std::mutex> lk(g_bulletMutex);
+        for (int i = 0; i < 3; ++i)
         {
-            std::lock_guard<std::mutex> lk(g_bulletMutex);
-            for (int i = 0; i < 3; ++i)
-            {
-                g_lastBulletSrc[i] = src[i];
-                g_lastBulletAng[i] = ang[i];
-                g_lastBulletFwd[i] = dir[i];
-            }
-        }
-
-        // Register a capsule hole
-        void *smokeHead = nullptr;
-        bool smokePresent = g_pAutoListHead &&
-                            SafeRead(g_pAutoListHead, 0, smokeHead, g_safeReadBulletFailures) &&
-                            smokeHead;
-        if (g_pRayTrace && smokePresent)
-        {
-            g_traceAttempts.fetch_add(1, std::memory_order_relaxed);
-            float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-            if (len > 1e-4f)
-            {
-                // shooter pawn; also used to pick per-weapon radius
-                void *shooter = nullptr;
-                if (a1 && !SafeRead(reinterpret_cast<const void *>(a1), 56, shooter,
-                                    g_safeReadBulletFailures))
-                    shooter = nullptr;
-                // resolve active weapon -> shotgun gets a wider hole
-                int def = ActiveWeaponDef(shooter);
-                bool isShotgun = IsShotgunDef(def);
-                g_lastWeaponDef.store(def, std::memory_order_relaxed);
-                g_lastWeaponShotgun.store(isShotgun ? 1 : 0, std::memory_order_relaxed);
-                float radius = (isShotgun ? g_bulletRadiusShotgunMilli : g_bulletRadiusMilli)
-                                   .load(std::memory_order_relaxed) *
-                               0.001f;
-
-                float range = g_bulletRangeMilli.load(std::memory_order_relaxed) * 0.001f;
-                float inv = range / len;
-                cs2bv::rt::Vector start{src[0], src[1], src[2]};
-                cs2bv::rt::Vector end{src[0] + dir[0] * inv, src[1] + dir[1] * inv, src[2] + dir[2] * inv};
-                cs2bv::rt::TraceOptions opts; // default InteractsWith = MASK_SHOT_PHYSICS
-                cs2bv::rt::TraceResult res;
-                if (g_pRayTrace->TraceEndShape(&start, &end, shooter, &opts, &res))
-                {
-                    g_traceHits.fetch_add(1, std::memory_order_relaxed);
-                    float endp[3] = {res.EndPos.x, res.EndPos.y, res.EndPos.z};
-                    cs2bv::hooks::OnBulletHole(src, endp, radius);
-                }
-                else
-                {
-                    float endp[3] = {end.x, end.y, end.z}; // no hit → full range
-                    cs2bv::hooks::OnBulletHole(src, endp, radius);
-                }
-            }
+            g_lastBulletSrc[i] = src[i];
+            g_lastBulletAng[i] = ang[i];
+            g_lastBulletFwd[i] = dir[i];
         }
     }
+
     return g_origPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
                              a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
 }
@@ -579,11 +616,9 @@ static int BotSlotFromBot(__int64 bot)
 // Mixes aligned bot pointers before indexing the fixed-size cache
 static size_t BotThresholdCacheIndex(__int64 bot)
 {
-    uint64_t key = static_cast<uint64_t>(bot);
-    key ^= key >> 33;
-    key *= 0xff51afd7ed558ccdULL;
-    key ^= key >> 33;
-    return static_cast<size_t>(key) & (kBotThresholdCacheSize - 1);
+    return static_cast<size_t>(
+               MixPointerValue(static_cast<uintptr_t>(bot))) &
+           (kBotThresholdCacheSize - 1);
 }
 
 // Returns a cached bot threshold and periodically revalidates the pointer chain

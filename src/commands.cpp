@@ -276,7 +276,7 @@ CON_COMMAND_F(bv_bullet_duration,
 }
 
 CON_COMMAND_F(bv_bullet_holes,
-              "bv_bullet_holes <0|1>  enable bullet-through-smoke holes (default 0).",
+              "bv_bullet_holes <0|1>  enable bullet-through-smoke holes (default 1).",
               FCVAR_NONE)
 {
     if (args.ArgC() < 2)
