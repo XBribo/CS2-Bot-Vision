@@ -2,9 +2,8 @@
 
 #include <ISmmPlugin.h>
 
-#include <Windows.h>
 #include <cstdio>
-#include <cstring>
+#include <filesystem>
 #include <string>
 
 #include <eiface.h>
@@ -12,64 +11,79 @@
 #include <convar.h>
 #include <interfaces/interfaces.h>
 
-#include "hooks.h"
-#include "commands.h"
-#include "raytrace_iface.h"
+#include "BotVision/BotVision.h"
+#include "common/commands.h"
+#include "common/platform.h"
+#include "common/raytrace_iface.h"
 
 class BotVisionPlugin : public ISmmPlugin
 {
 public:
+    // Loads interfaces and installs all BotVision modules
     bool Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late) override;
+
+    // Removes all BotVision modules and console state
     bool Unload(char *error, size_t maxlen) override;
 
+    // Accepts plugin pause requests
     bool Pause(char * /*error*/, size_t /*maxlen*/) override { return true; }
+
+    // Accepts plugin unpause requests
     bool Unpause(char * /*error*/, size_t /*maxlen*/) override { return true; }
+
+    // Retries optional interfaces after all plugins are loaded
     void AllPluginsLoaded() override;
 
-    void TryFetchRayTrace(); // resolve CRayTraceInterface
+    // Resolves the optional CRayTraceInterface
+    void TryFetchRayTrace();
+
     ISmmAPI *m_ismm = nullptr;
 
+    // Returns plugin author metadata
     const char *GetAuthor() override { return "XBribo(๑•.•๑)"; }
+
+    // Returns plugin name metadata
     const char *GetName() override { return "BotVision"; }
+
+    // Returns plugin description metadata
     const char *GetDescription() override { return "Volumetric smoke bots."; }
+
+    // Returns plugin URL metadata
     const char *GetURL() override { return ""; }
+
+    // Returns plugin license metadata
     const char *GetLicense() override { return "AGPL3.0"; }
-    const char *GetVersion() override { return "0.1.7"; }
+
+    // Returns plugin version metadata
+    const char *GetVersion() override { return "0.2.0"; }
+
+    // Returns plugin build date metadata
     const char *GetDate() override { return __DATE__; }
+
+    // Returns plugin log tag metadata
     const char *GetLogTag() override { return "BV"; }
 };
 
 BotVisionPlugin g_botVisionPlugin;
 PLUGIN_EXPOSE(BotVisionPlugin, g_botVisionPlugin);
 
-static HMODULE GetSelfModule()
-{
-    HMODULE mod = nullptr;
-    GetModuleHandleExA(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCSTR>(&GetSelfModule),
-        &mod);
-    return mod;
-}
-
+// Resolves gamedata.json beside the plugin directory
 static std::string ComputeGamedataPath()
 {
-    char path[MAX_PATH] = {0};
-    if (GetModuleFileNameA(GetSelfModule(), path, MAX_PATH) == 0)
+    std::filesystem::path path(cs2bv::platform::SelfModulePath());
+    if (path.empty())
         return "";
 
     for (int i = 0; i < 3; ++i)
     {
-        char *slash = std::strrchr(path, '\\');
-        if (!slash)
+        if (!path.has_parent_path())
             return "";
-        *slash = '\0';
+        path = path.parent_path();
     }
-    std::string result(path);
-    result += "\\gamedata.json";
-    return result;
+    return (path / "gamedata.json").string();
 }
 
+// Loads engine interfaces and installs the coordinated modules
 bool BotVisionPlugin::Load(PluginId id, ISmmAPI *ismm,
                            char *error, size_t maxlen, bool /*late*/)
 {
@@ -79,7 +93,8 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI *ismm,
         ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bv::commands::g_pEngine)
     {
-        OutputDebugStringA("[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
+        cs2bv::platform::DebugOut(
+            "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
     }
 
     // Wires g_pCVar and registers every CON_COMMAND_F
@@ -113,51 +128,70 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI *ismm,
     char dbg[MAX_PATH + 64];
     std::snprintf(dbg, sizeof(dbg),
                   "[BotVision] Load: gamedata=%s\n", gamedataPath.c_str());
-    OutputDebugStringA(dbg);
+    cs2bv::platform::DebugOut(dbg);
 
-    if (!cs2bv::hooks::Install(gamedataPath, serverIface, error, maxlen))
+    if (!cs2bv::BotVision::Install(
+            gamedataPath, serverIface, error, maxlen))
     {
         return false;
     }
 
-    cs2bv::hooks::SetEngine(cs2bv::commands::g_pEngine);
+    cs2bv::BotVision::SetEngine(cs2bv::commands::g_pEngine);
 
     // Fetch the Ray-Trace interface
     m_ismm = ismm;
     TryFetchRayTrace();
 
     cs2bv::commands::Register();
-    OutputDebugStringA("[BotVision] plugin loaded successfully\n");
+    cs2bv::platform::DebugOut(
+        "[BotVision] plugin loaded successfully\n");
     return true;
 }
 
+// Resolves and publishes the optional external ray-trace interface
 void BotVisionPlugin::TryFetchRayTrace()
 {
     if (!m_ismm)
         return;
-    int rtRet = 0;
-    void *rtIface = m_ismm->MetaFactory(RAYTRACE_INTERFACE_VERSION, &rtRet, nullptr);
-    cs2bv::hooks::SetRayTrace(rtIface, rtRet);
-    char rb[160];
-    std::snprintf(rb, sizeof(rb), rtIface ? "[BotVision] RayTrace %s @ %p (bullet wall-clip active)\n" : "[BotVision] WARN: RayTrace %s unavailable (ret=%d); bullet holes disabled\n",
-                  RAYTRACE_INTERFACE_VERSION, rtIface ? (void *)rtIface : (void *)(intptr_t)rtRet);
-    OutputDebugStringA(rb);
+    int returnCode = 0;
+    void *rayTrace = m_ismm->MetaFactory(
+        RAYTRACE_INTERFACE_VERSION, &returnCode, nullptr);
+    cs2bv::BotVision::SetRayTrace(rayTrace, returnCode);
+
+    char message[160];
+    if (rayTrace)
+    {
+        std::snprintf(
+            message, sizeof(message),
+            "[BotVision] RayTrace %s @ %p (bullet wall-clip active)\n",
+            RAYTRACE_INTERFACE_VERSION, rayTrace);
+    }
+    else
+    {
+        std::snprintf(
+            message, sizeof(message),
+            "[BotVision] WARN: RayTrace %s unavailable (ret=%d); bullet holes disabled\n",
+            RAYTRACE_INTERFACE_VERSION, returnCode);
+    }
+    cs2bv::platform::DebugOut(message);
 }
 
+// Retries ray tracing after every Metamod plugin has loaded
 void BotVisionPlugin::AllPluginsLoaded()
 {
-    // Retry once everyone is up
-    if (!cs2bv::hooks::RayTraceReady())
+    if (!cs2bv::BotVision::RayTraceReady())
         TryFetchRayTrace();
 }
 
+// Removes commands, hooks, and acquired engine state
 bool BotVisionPlugin::Unload(char * /*error*/, size_t /*maxlen*/)
 {
     cs2bv::commands::Unregister();
-    cs2bv::hooks::Remove();
+    cs2bv::BotVision::Remove();
     ConVar_Unregister();
     g_pCVar = nullptr;
     cs2bv::commands::g_pEngine = nullptr;
-    OutputDebugStringA("[BotVision] plugin unloaded\n");
+    cs2bv::BotVision::SetEngine(nullptr);
+    cs2bv::platform::DebugOut("[BotVision] plugin unloaded\n");
     return true;
 }

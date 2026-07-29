@@ -74,15 +74,26 @@ set(SDK_SOURCES
 
 add_library(BotVision SHARED
     src/plugin.cpp
-    src/hooks.cpp
-    src/commands.cpp
-    src/sig_scan.cpp
+    src/BotVision/BotVision.cpp
+    src/SmokeVision/SmokeVision.cpp
+    src/HeVision/HeVision.cpp
+    src/BulletVision/BulletVision.cpp
+    src/common/commands.cpp
+    src/common/game_time.cpp
+    src/common/memory.cpp
+    src/common/platform.cpp
+    src/common/sig_scan.cpp
     ${PROTO_SRCS}
     ${SDK_SOURCES}
 )
 
 target_include_directories(BotVision PRIVATE
     src
+    src/BotVision
+    src/SmokeVision
+    src/HeVision
+    src/BulletVision
+    src/common
     ${CMAKE_SOURCE_DIR}/third_party
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src

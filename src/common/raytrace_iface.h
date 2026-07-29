@@ -1,4 +1,4 @@
-// Ray-Trace Metamod module's interface
+// Ray-Trace Metamod module interface
 
 #pragma once
 
@@ -33,12 +33,15 @@ namespace cs2bv::rt
     class CRayTraceInterface
     {
     public:
+        // Releases an external ray-trace interface
         virtual ~CRayTraceInterface() = default;
 
+        // Traces from a point using an angle representation
         virtual bool TraceShape(const Vector *pVecStart, const void *pAngAngles,
                                 void *pIgnoreEntity, TraceOptions *pTraceOptions,
                                 TraceResult *pTraceResult) = 0;
 
+        // Traces between two explicit positions
         virtual bool TraceEndShape(const Vector *pVecStart, const Vector *pVecEnd,
                                    void *pIgnoreEntity, TraceOptions *pTraceOptions,
                                    TraceResult *pTraceResult) = 0;

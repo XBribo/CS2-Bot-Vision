@@ -1,4 +1,4 @@
-// sig_scan.cpp
+// Signature scanning and gamedata helpers
 //
 // Signature scanning + gamedata.json loader.
 
@@ -24,6 +24,7 @@ namespace cs2bv::sig
 {
     namespace
     {
+        // Returns the final component of a platform path
         const char *BaseName(const char *path)
         {
             if (!path)
@@ -34,6 +35,7 @@ namespace cs2bv::sig
             return base ? base + 1 : path;
         }
 
+        // Formats a signature error into an optional output buffer
         void SetError(char *out, size_t outLen, const char *fmt, const char *a, const char *b = nullptr)
         {
             if (!out || outLen == 0)
@@ -45,6 +47,7 @@ namespace cs2bv::sig
         }
 
 #if defined(_WIN32)
+        // Resolves module boundaries from a Windows module handle
         ModuleInfo ModuleFromHandle(HMODULE handle)
         {
             ModuleInfo out;
@@ -61,6 +64,7 @@ namespace cs2bv::sig
             return out;
         }
 #else
+        // Compares a loaded module path with a requested module name
         bool NameMatches(const char *loadedPath, const char *moduleName)
         {
             if (!loadedPath || !loadedPath[0] || !moduleName || !moduleName[0])
@@ -70,6 +74,7 @@ namespace cs2bv::sig
             return std::strcmp(loadedBase, wantBase) == 0;
         }
 
+        // Collects readable load segments from one ELF module
         void FillModuleFromPhdr(dl_phdr_info *info, ModuleInfo &out)
         {
             uintptr_t minAddr = UINTPTR_MAX;
@@ -105,6 +110,7 @@ namespace cs2bv::sig
             ModuleInfo Result;
         };
 
+        // Selects an ELF module by basename
         int FindByNameCallback(dl_phdr_info *info, size_t, void *data)
         {
             auto *ctx = static_cast<FindByNameCtx *>(data);
@@ -121,6 +127,7 @@ namespace cs2bv::sig
             ModuleInfo Result;
         };
 
+        // Selects the ELF module containing an address
         int FindByAddressCallback(dl_phdr_info *info, size_t, void *data)
         {
             auto *ctx = static_cast<FindByAddressCtx *>(data);
@@ -143,6 +150,7 @@ namespace cs2bv::sig
 #endif
     } // namespace
 
+    // Loads and parses a gamedata JSON object
     bool LoadGamedata(const char *path, nlohmann::json &out)
     {
         std::ifstream ifs(path, std::ios::binary);
@@ -159,6 +167,7 @@ namespace cs2bv::sig
         return out.is_object();
     }
 
+    // Returns the gamedata key for the current platform
     const char *PlatformName()
     {
 #if defined(_WIN32)
@@ -168,6 +177,7 @@ namespace cs2bv::sig
 #endif
     }
 
+    // Returns one platform-specific signature string
     std::string FindPlatformSig(const nlohmann::json &gamedata, const std::string &name)
     {
         auto it = gamedata.find(name);
@@ -182,6 +192,7 @@ namespace cs2bv::sig
         return platformIt->get<std::string>();
     }
 
+    // Parses signature bytes and wildcard positions
     bool ParseSigString(const std::string &sigStr,
                         std::vector<uint8_t> &outBytes,
                         std::vector<bool> &outWild)
@@ -216,6 +227,7 @@ namespace cs2bv::sig
         return !outBytes.empty();
     }
 
+    // Finds the first matching byte pattern in module segments
     void *FindPatternIn(const ModuleInfo &module,
                         const std::vector<uint8_t> &pattern,
                         const std::vector<bool> &wild)
@@ -247,6 +259,7 @@ namespace cs2bv::sig
         return nullptr;
     }
 
+    // Resolves a loaded module by basename
     ModuleInfo ModuleFromName(const char *moduleName)
     {
 #if defined(_WIN32)
@@ -259,6 +272,7 @@ namespace cs2bv::sig
 #endif
     }
 
+    // Resolves the module owning an interface virtual table
     ModuleInfo ModuleFromInterfacePtr(void *interfacePtr)
     {
         if (!interfacePtr)
@@ -282,6 +296,7 @@ namespace cs2bv::sig
 #endif
     }
 
+    // Resolves one named gamedata signature in a module
     void *ResolveSig(const nlohmann::json &gamedata, const ModuleInfo &module,
                      const char *name, char *errorOut, size_t errorOutLen)
     {

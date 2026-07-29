@@ -1,4 +1,4 @@
-// sig_scan.h
+// Signature scanning and gamedata helpers
 
 #pragma once
 
@@ -23,6 +23,7 @@ namespace cs2bv::sig
         size_t Size = 0;
         std::vector<ModuleSegment> Segments;
 
+        // Reports whether module boundaries were resolved
         explicit operator bool() const { return Base != nullptr && Size != 0; }
     };
 

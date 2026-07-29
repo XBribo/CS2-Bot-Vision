@@ -1,35 +1,39 @@
-// cdetour.h
-//
-// Thin funchook wrapper for inline detours.
+// Inline hook wrapper over funchook
 
 #pragma once
 
 #include <funchook.h>
 
-namespace cs2bv::hooks
+namespace cs2bv
 {
-    // Inline detour over a resolved address. T = hooked function signature
-    template <typename T>
-    class CDetour
+    // Owns one prepared or installed funchook detour
+    class Hook
     {
     public:
-        explicit CDetour(const char *name) : m_name(name) {}
-        ~CDetour() { Free(); }
+        // Creates an empty hook owner
+        Hook() = default;
 
-        CDetour(const CDetour &) = delete;
-        CDetour &operator=(const CDetour &) = delete;
+        // Removes the owned hook
+        ~Hook() { Remove(); }
 
-        /* Prepare a detour at `target`; writes the trampoline into *origOut.
-           Returns false on alloc/prepare failure */
-        bool Create(void *target, void *detour, void **origOut)
+        // Prevents duplicate ownership of a hook handle
+        Hook(const Hook &) = delete;
+
+        // Prevents duplicate ownership through assignment
+        Hook &operator=(const Hook &) = delete;
+
+        // Prepares a detour and publishes its trampoline
+        bool Create(void *target, void *detour, void **original)
         {
-            if (!target || m_hook)
+            if (m_hook || !target || !detour || !original)
                 return false;
+
             m_hook = funchook_create();
             if (!m_hook)
                 return false;
-            *origOut = target;
-            if (funchook_prepare(m_hook, origOut, detour) != FUNCHOOK_ERROR_SUCCESS)
+
+            *original = target;
+            if (funchook_prepare(m_hook, original, detour) != FUNCHOOK_ERROR_SUCCESS)
             {
                 funchook_destroy(m_hook);
                 m_hook = nullptr;
@@ -38,7 +42,7 @@ namespace cs2bv::hooks
             return true;
         }
 
-        // Arm the detour
+        // Installs the prepared detour
         bool Enable()
         {
             if (!m_hook || m_installed)
@@ -49,8 +53,8 @@ namespace cs2bv::hooks
             return true;
         }
 
-        // Disarm + free the funchook handle
-        void Free()
+        // Uninstalls and destroys the detour
+        void Remove()
         {
             if (!m_hook)
                 return;
@@ -63,12 +67,11 @@ namespace cs2bv::hooks
             m_hook = nullptr;
         }
 
-        const char *Name() const { return m_name; }
-        bool Installed() const { return m_installed; }
+        // Reports whether the detour is installed
+        bool Active() const { return m_installed; }
 
     private:
-        const char *m_name = nullptr;
         funchook_t *m_hook = nullptr;
         bool m_installed = false;
     };
-} // namespace cs2bv::hooks
+}
