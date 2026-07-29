@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve CS2-Bot-Controller.
+        Thanks for helping improve CS2-Bot-Vision.
 
         Please report only one problem per issue and check existing issues before submitting.
 
