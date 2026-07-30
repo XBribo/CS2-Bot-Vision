@@ -91,6 +91,7 @@ jobs:
         run: |
           test -f dist/windows/addons/BotVision/bin/win64/BotVision.dll
           test -f dist/windows/addons/metamod/BotVision.vdf
+          test ! -e dist/windows/addons/metamod/BotVision.linux.vdf
 
       - name: Upload package
         uses: actions/upload-artifact@v7

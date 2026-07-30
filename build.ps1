@@ -51,11 +51,15 @@ function Build-Dist([string]$Plugin) {
         Remove-Item -LiteralPath $DistDir -Recurse -Force
     }
 
-    New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $Root "configs/addons") -Destination $DistDir -Recurse -Force
-
+    $BotDir = Join-Path $DistDir "addons/BotVision"
     $BinDir = Join-Path $DistDir "addons/BotVision/bin/win64"
+    $MetaDir = Join-Path $DistDir "addons/metamod"
+    New-Item -ItemType Directory -Path $BotDir -Force | Out-Null
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $MetaDir -Force | Out-Null
+
+    Copy-Item -LiteralPath (Join-Path $Root "configs/addons/BotVision/gamedata.json") -Destination $BotDir -Force
+    Copy-Item -LiteralPath (Join-Path $Root "configs/addons/metamod/BotVision.vdf") -Destination $MetaDir -Force
     Copy-Item -LiteralPath $Plugin -Destination $BinDir -Force
     Write-Ok "assembled $DistDir"
 }
