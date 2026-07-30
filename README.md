@@ -35,8 +35,7 @@ BotVision evaluates smoke density, HE blast holes, and bullet holes before decid
 
 ### Through-smoke reveal
 
-Player slots range from `0` to `63`. Multiple human players or bots can be
-selected at the same time:
+Slots range from `0` to `63`. 
 
 ```text
 bv_reveal add 10
@@ -50,9 +49,6 @@ bv_reveal clear
 - `remove <slot>` - remove one player from the reveal set.
 - `list` - list selected players and their entity handles.
 - `clear` - clear the reveal set.
-
-`hook=active` in `bv_reveal list` confirms that the player-visibility hook
-was installed successfully.
 
 ------------------------------------------------------------------------
 
