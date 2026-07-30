@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           test -f dist/windows/addons/BotVision/bin/win64/BotVision.dll
-          test -f dist/windows/addons/metamod/BotHider.vdf
+          test -f dist/windows/addons/metamod/BotVision.vdf
 
       - name: Upload package
         uses: actions/upload-artifact@v7
