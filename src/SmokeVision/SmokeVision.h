@@ -78,6 +78,24 @@ namespace cs2bv::SmokeVision
     // Returns the last pawn pointer observed by the per-bot hook
     unsigned long long GetLastPawnPointer();
 
+    // Adds one player slot to the smoke reveal set
+    void AddRevealSlot(int slot);
+
+    // Removes one player slot from the smoke reveal set
+    void RemoveRevealSlot(int slot);
+
+    // Clears every smoke reveal
+    void ClearReveals();
+
+    // Returns the selected reveal slot mask
+    unsigned long long GetRevealMask();
+
+    // Returns one revealed player's latched controller handle
+    unsigned int GetRevealHandle(int slot);
+
+    // Reports whether the player visibility hook is active
+    bool IsVisiblePlayerHooked();
+
     // Formats a smoke density test for one line
     int TestLos(float fromX, float fromY, float fromZ,
                 float toX, float toY, float toZ,

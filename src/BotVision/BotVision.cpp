@@ -367,4 +367,40 @@ namespace cs2bv::BotVision
     {
         return SmokeVision::GetLastPawnPointer();
     }
+
+    // Adds one smoke reveal slot
+    void AddRevealSlot(int slot)
+    {
+        SmokeVision::AddRevealSlot(slot);
+    }
+
+    // Removes one smoke reveal slot
+    void RemoveRevealSlot(int slot)
+    {
+        SmokeVision::RemoveRevealSlot(slot);
+    }
+
+    // Clears all smoke reveals
+    void ClearReveals()
+    {
+        SmokeVision::ClearReveals();
+    }
+
+    // Returns the configured smoke reveal mask
+    unsigned long long GetRevealMask()
+    {
+        return SmokeVision::GetRevealMask();
+    }
+
+    // Returns one revealed player handle
+    unsigned int GetRevealHandle(int slot)
+    {
+        return SmokeVision::GetRevealHandle(slot);
+    }
+
+    // Checks whether player visibility is hooked
+    bool IsVisiblePlayerHooked()
+    {
+        return SmokeVision::IsVisiblePlayerHooked();
+    }
 }

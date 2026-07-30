@@ -155,4 +155,22 @@ namespace cs2bv::BotVision
 
     // Returns the last observed pawn pointer
     unsigned long long GetLastPawnPtr();
+
+    // Adds one player slot to the smoke reveal set
+    void AddRevealSlot(int slot);
+
+    // Removes one player slot from the smoke reveal set
+    void RemoveRevealSlot(int slot);
+
+    // Clears every smoke reveal
+    void ClearReveals();
+
+    // Returns the selected reveal slot mask
+    unsigned long long GetRevealMask();
+
+    // Returns one revealed player's latched controller handle
+    unsigned int GetRevealHandle(int slot);
+
+    // Reports whether the player visibility hook is active
+    bool IsVisiblePlayerHooked();
 }

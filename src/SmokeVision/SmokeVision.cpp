@@ -27,6 +27,9 @@ namespace cs2bv::SmokeVision
     using IsVisiblePosFn =
         __int64(__fastcall *)(__int64 self, __int64 position,
                               char testFov, void *entity);
+    using IsVisiblePlayerFn =
+        bool(__fastcall *)(__int64 self, void *player,
+                           char testFov, unsigned char *visibleParts);
 
     static constexpr const char *kSmokeFunctionName =
         "CBotManager::IsVisibleThroughSmoke";
@@ -36,14 +39,18 @@ namespace cs2bv::SmokeVision
         "GetSmokeDensityInLine";
     static constexpr const char *kVisiblePosName =
         "CCSBot::IsVisiblePos";
+    static constexpr const char *kVisiblePlayerName =
+        "CCSBot::IsVisiblePlayer";
     static constexpr int kMaxBots = 64;
     static constexpr int kDefaultThreshold = INT_MIN;
 
     static IsVisibleThroughSmokeFn g_originalIsVisibleThroughSmoke = nullptr;
     static GetSmokeDensityInLineFn g_getSmokeDensityInLine = nullptr;
     static IsVisiblePosFn g_originalIsVisiblePos = nullptr;
+    static IsVisiblePlayerFn g_originalIsVisiblePlayer = nullptr;
     static Hook g_smokeHook;
     static Hook g_visiblePosHook;
+    static Hook g_visiblePlayerHook;
     static void **g_autoListHead = nullptr;
 
     static std::atomic<long long> g_hitCount{0};
@@ -62,6 +69,9 @@ namespace cs2bv::SmokeVision
     static std::atomic<long long> g_isVisiblePosCalls{0};
     static std::atomic<unsigned int> g_lastControllerHandle{0};
     static std::atomic<unsigned long long> g_lastPawnPointer{0};
+    static std::atomic<unsigned long long> g_revealMask{0};
+    static std::atomic<unsigned int> g_revealHandles[kMaxBots];
+    static thread_local bool g_currentPlayerRevealed = false;
 
     struct BotThresholdCacheEntry
     {
@@ -321,6 +331,42 @@ namespace cs2bv::SmokeVision
         return slot;
     }
 
+    // Checks and latches one player from the reveal slot mask
+    static bool IsRevealedPlayer(
+        void *player, unsigned long long revealMask)
+    {
+        if (revealMask == 0 || !player)
+            return false;
+
+        uint32_t handle = 0;
+        std::memcpy(
+            &handle,
+            static_cast<const unsigned char *>(player) +
+                g_controllerHandleOffset,
+            sizeof(handle));
+        if (handle == 0u || handle == 0xFFFFFFFFu)
+            return false;
+
+        const int slot = static_cast<int>(handle & 0x7FFFu) - 1;
+        if (slot < 0 || slot >= kMaxBots ||
+            (revealMask & (1ULL << slot)) == 0)
+        {
+            return false;
+        }
+
+        unsigned int expectedHandle =
+            g_revealHandles[slot].load(std::memory_order_relaxed);
+        if (expectedHandle == 0u)
+        {
+            g_revealHandles[slot].compare_exchange_strong(
+                expectedHandle, handle, std::memory_order_relaxed);
+            expectedHandle =
+                g_revealHandles[slot].load(
+                    std::memory_order_relaxed);
+        }
+        return expectedHandle == handle;
+    }
+
     // Returns the cache index for one bot pointer
     static size_t BotThresholdCacheIndex(__int64 bot)
     {
@@ -416,11 +462,36 @@ namespace cs2bv::SmokeVision
         return result;
     }
 
+    // Stamps target reveal state around one complete player visibility scan
+    static bool __fastcall HookedIsVisiblePlayer(
+        __int64 self, void *player,
+        char testFov, unsigned char *visibleParts)
+    {
+        const unsigned long long revealMask =
+            g_revealMask.load(std::memory_order_acquire);
+        if (revealMask == 0)
+        {
+            return g_originalIsVisiblePlayer(
+                self, player, testFov, visibleParts);
+        }
+
+        const bool previousReveal = g_currentPlayerRevealed;
+        g_currentPlayerRevealed =
+            IsRevealedPlayer(player, revealMask);
+        const bool result = g_originalIsVisiblePlayer(
+            self, player, testFov, visibleParts);
+        g_currentPlayerRevealed = previousReveal;
+        return result;
+    }
+
     // Replaces binary smoke visibility with density and hole checks
     static bool __fastcall HookedIsVisibleThroughSmoke(
         void *self, const void *from, const void *to)
     {
         g_hitCount.fetch_add(1, std::memory_order_relaxed);
+        if (g_currentPlayerRevealed)
+            return true;
+
         if (!IsVolumeMode() || !from || !to ||
             !g_getSmokeDensityInLine)
         {
@@ -467,9 +538,12 @@ namespace cs2bv::SmokeVision
         {
             g_botThresholdMilli[slot].store(
                 kDefaultThreshold, std::memory_order_relaxed);
+            g_revealHandles[slot].store(
+                0, std::memory_order_relaxed);
         }
         g_botThresholdOverrideCount.store(0, std::memory_order_relaxed);
         g_cacheGeneration.fetch_add(1, std::memory_order_relaxed);
+        g_revealMask.store(0, std::memory_order_relaxed);
 
         g_controllerHandleOffset = sig::ResolveOffset(
             gamedata, "CBasePlayerPawn::m_hController",
@@ -575,12 +649,48 @@ namespace cs2bv::SmokeVision
                 visibleTarget ? "funchook error" : visibleError);
             platform::DebugOut(warning);
         }
+
+        char visiblePlayerError[256] = {0};
+        bool chainedPlayerDetour = false;
+        void *visiblePlayerTarget = ResolveWithDetourFallback(
+            gamedata, serverModule, kVisiblePlayerName,
+            chainedPlayerDetour,
+            visiblePlayerError, sizeof(visiblePlayerError));
+        if (visiblePlayerTarget &&
+            g_visiblePlayerHook.Create(
+                visiblePlayerTarget,
+                reinterpret_cast<void *>(&HookedIsVisiblePlayer),
+                reinterpret_cast<void **>(&g_originalIsVisiblePlayer)) &&
+            g_visiblePlayerHook.Enable())
+        {
+            std::snprintf(
+                message, sizeof(message),
+                "[BotVision] %s @ %p (target reveal active%s)\n",
+                kVisiblePlayerName, visiblePlayerTarget,
+                chainedPlayerDetour ? ", chained existing detour" : "");
+            platform::DebugOut(message);
+        }
+        else
+        {
+            g_visiblePlayerHook.Remove();
+            g_originalIsVisiblePlayer = nullptr;
+            char warning[320];
+            std::snprintf(
+                warning, sizeof(warning),
+                "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n",
+                visiblePlayerTarget
+                    ? "funchook error"
+                    : visiblePlayerError);
+            platform::DebugOut(warning);
+        }
         return true;
     }
 
     // Removes the smoke hooks and resolved runtime pointers
     void Remove()
     {
+        g_visiblePlayerHook.Remove();
+        g_originalIsVisiblePlayer = nullptr;
         g_visiblePosHook.Remove();
         g_originalIsVisiblePos = nullptr;
         g_smokeHook.Remove();
@@ -748,6 +858,60 @@ namespace cs2bv::SmokeVision
     unsigned long long GetLastPawnPointer()
     {
         return g_lastPawnPointer.load(std::memory_order_relaxed);
+    }
+
+    // Adds a reveal slot and resets its entity generation
+    void AddRevealSlot(int slot)
+    {
+        if (slot < 0 || slot >= kMaxBots)
+            return;
+        g_revealHandles[slot].store(
+            0, std::memory_order_relaxed);
+        g_revealMask.fetch_or(
+            1ULL << slot, std::memory_order_release);
+    }
+
+    // Removes one reveal slot
+    void RemoveRevealSlot(int slot)
+    {
+        if (slot < 0 || slot >= kMaxBots)
+            return;
+        g_revealMask.fetch_and(
+            ~(1ULL << slot), std::memory_order_release);
+        g_revealHandles[slot].store(
+            0, std::memory_order_relaxed);
+    }
+
+    // Clears all reveal slots
+    void ClearReveals()
+    {
+        g_revealMask.store(0, std::memory_order_release);
+        for (int slot = 0; slot < kMaxBots; ++slot)
+        {
+            g_revealHandles[slot].store(
+                0, std::memory_order_relaxed);
+        }
+    }
+
+    // Returns the configured reveal mask
+    unsigned long long GetRevealMask()
+    {
+        return g_revealMask.load(std::memory_order_acquire);
+    }
+
+    // Returns a revealed player's latched controller handle
+    unsigned int GetRevealHandle(int slot)
+    {
+        if (slot < 0 || slot >= kMaxBots)
+            return 0;
+        return g_revealHandles[slot].load(
+            std::memory_order_relaxed);
+    }
+
+    // Checks whether player visibility is hooked
+    bool IsVisiblePlayerHooked()
+    {
+        return g_originalIsVisiblePlayer != nullptr;
     }
 
     // Formats a diagnostic density query

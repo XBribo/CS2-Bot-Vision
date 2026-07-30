@@ -194,6 +194,85 @@ CON_COMMAND_F(bv_bot_density,
                                        slot, cs2bv::BotVision::GetBotDensityThreshold(slot));
 }
 
+// Manages players whose smoke visibility checks are bypassed
+CON_COMMAND_F(bv_reveal,
+              "bv_reveal <add|remove|list|clear> [slot].",
+              FCVAR_NONE)
+{
+    const char *action = args.ArgC() >= 2 ? args.Arg(1) : "list";
+    if (std::strcmp(action, "list") == 0)
+    {
+        const unsigned long long mask =
+            cs2bv::BotVision::GetRevealMask();
+        cs2bv::commands::PrintToCaller(
+            context, "smoke reveals (hook=%s):\n",
+            cs2bv::BotVision::IsVisiblePlayerHooked()
+                ? "active"
+                : "unavailable");
+        int shown = 0;
+        for (int slot = 0;
+             slot < cs2bv::BotVision::GetMaxBots(); ++slot)
+        {
+            if ((mask & (1ULL << slot)) == 0)
+                continue;
+            cs2bv::commands::PrintToCaller(
+                context, "  slot %d handle=0x%X\n",
+                slot,
+                cs2bv::BotVision::GetRevealHandle(slot));
+            ++shown;
+        }
+        if (shown == 0)
+            cs2bv::commands::PrintToCaller(
+                context, "  (none)\n");
+        return;
+    }
+
+    if (std::strcmp(action, "clear") == 0)
+    {
+        cs2bv::BotVision::ClearReveals();
+        cs2bv::commands::PrintToCaller(
+            context, "all smoke reveals cleared\n");
+        return;
+    }
+
+    const bool add = std::strcmp(action, "add") == 0;
+    const bool remove = std::strcmp(action, "remove") == 0;
+    if ((!add && !remove) || args.ArgC() < 3)
+    {
+        cs2bv::commands::PrintToCaller(
+            context,
+            "usage: bv_reveal <add|remove> <slot>, "
+            "bv_reveal <list|clear>\n");
+        return;
+    }
+
+    const int slot = std::atoi(args.Arg(2));
+    if (slot < 0 || slot >= cs2bv::BotVision::GetMaxBots())
+    {
+        cs2bv::commands::PrintToCaller(
+            context, "slot must be 0-%d\n",
+            cs2bv::BotVision::GetMaxBots() - 1);
+        return;
+    }
+
+    if (add)
+    {
+        cs2bv::BotVision::AddRevealSlot(slot);
+        cs2bv::commands::PrintToCaller(
+            context, "smoke reveal added: slot %d (%s)\n",
+            slot, cs2bv::BotVision::IsVisiblePlayerHooked()
+                      ? "active"
+                      : "IsVisiblePlayer hook unavailable");
+    }
+    else
+    {
+        cs2bv::BotVision::RemoveRevealSlot(slot);
+        cs2bv::commands::PrintToCaller(
+            context, "smoke reveal removed: slot %d\n",
+            slot);
+    }
+}
+
 // Reads or changes the HE hole radius
 CON_COMMAND_F(bv_he_radius,
               "bv_he_radius <r>  HE smoke-hole radius in units (default 200).",

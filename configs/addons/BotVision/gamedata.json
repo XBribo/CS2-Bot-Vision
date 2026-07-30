@@ -56,6 +56,14 @@
     },
     "comment": "CCSBot::IsVisible(pos)."
   },
+  "CCSBot::IsVisiblePlayer": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 08 44 88 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC 90 00 00 00 48 8D 05 ? ? ? ? 48 C7 45 CF 4D 01 00 00",
+      "linux": ""
+    },
+    "comment": "CCSBot::IsVisible(player)."
+  },
   "CBaseEntity::m_CBodyComponent": {
     "offsets": {
       "windows": 48,
