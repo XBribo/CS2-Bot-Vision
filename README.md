@@ -2,6 +2,8 @@
 
 **Make Bot Vision Great Again**
 
+## Your stars⭐ are my motivation to keep updating
+
 ------------------------------------------------------------------------
 
 ## Overview
