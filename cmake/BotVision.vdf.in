@@ -1,0 +1,5 @@
+"Metamod Plugin"
+{
+    "alias" "BotVision"
+    "file"  "@BV_VDF_FILE@"
+}
