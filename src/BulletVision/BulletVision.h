@@ -7,6 +7,8 @@
 #include <nlohmann/json.hpp>
 
 namespace cs2bv::BulletVision {
+using DensitySamplerFn = float (*)(const float* from, const float* to);
+
 // Resolves and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule);
 
@@ -19,11 +21,14 @@ void SetRayTrace(void* rayTrace, int returnCode);
 // Reports whether the external ray-trace interface is available
 bool RayTraceReady();
 
+// Tests a line with the HE-to-smoke collision mask
+bool IsLineUnobstructed(const float* from, const float* to);
+
 // Records one temporary bullet smoke tunnel
 void OnHole(const float start[3], const float end[3], float radius);
 
-// Tests whether a bot eye is inside an active bullet tunnel
-bool ClearsSegment(const float* from, const float* to);
+// Applies the bullet tunnel model to native line density
+float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler);
 
 // Sets the normal bullet tunnel radius
 void SetRadius(float value);

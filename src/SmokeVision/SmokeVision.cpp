@@ -74,6 +74,20 @@ static constexpr unsigned int kCacheRefreshUses = 1024;
 static constexpr unsigned int kInvalidCacheRefreshUses = 32;
 static thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
+// Calls the resolved native density function for effect modules
+static float SampleNativeDensity(const float* from, const float* to)
+{
+    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0f;
+}
+
+// Applies HE and bullet effects to native server density
+static float AdjustClientDensity(const float* from, const float* to, float density)
+{
+    float adjusted = density;
+    if (BulletVision::GetHolesEnabled()) adjusted = BulletVision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
+    return HeVision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
+}
+
 // Reports an install error to both the debug sink and plugin loader
 static void ReportError(char* error, size_t maxLength, const char* format, ...)
 {
@@ -395,8 +409,7 @@ static bool __fastcall HookedIsVisibleThroughSmoke(void* self, const void* from,
     const float threshold = thresholdMilli * 0.001f;
     if (density >= threshold)
     {
-        if (HeVision::ClearsSegment(fromValues, toValues)) return true;
-        if (BulletVision::GetHolesEnabled() && BulletVision::ClearsSegment(fromValues, toValues)) return true;
+        if (AdjustClientDensity(fromValues, toValues, density) < threshold) return true;
 
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -542,6 +555,31 @@ float DensityInLine(const float* from, const float* to)
     return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0f;
 }
 
+// Probes nearby native smoke density with occlusion checks
+bool HasSmokeNearPoint(const float* point, float radius)
+{
+    if (!point || radius <= 0.0f) return false;
+    if (!g_getSmokeDensityInLine) return HasSmokeProjectiles();
+
+    static constexpr float kDirections[][3] = {
+        { 1.0f, 0.0f, 0.0f },   { -1.0f, 0.0f, 0.0f },  { 0.0f, 1.0f, 0.0f },   { 0.0f, -1.0f, 0.0f },
+        { 0.0f, 0.0f, 1.0f },   { 0.0f, 0.0f, -1.0f },  { 0.57735f, 0.57735f, 0.57735f },
+        { 0.57735f, 0.57735f, -0.57735f },               { 0.57735f, -0.57735f, 0.57735f },
+        { 0.57735f, -0.57735f, -0.57735f },              { -0.57735f, 0.57735f, 0.57735f },
+        { -0.57735f, 0.57735f, -0.57735f },              { -0.57735f, -0.57735f, 0.57735f },
+        { -0.57735f, -0.57735f, -0.57735f }
+    };
+
+    for (const auto& direction : kDirections)
+    {
+        float from[3] = { point[0], point[1], point[2] };
+        float to[3] = { point[0] + direction[0] * radius, point[1] + direction[1] * radius, point[2] + direction[2] * radius };
+        float closest[3]{};
+        if (g_getSmokeDensityInLine(from, to, closest) > 0.0f && BulletVision::IsLineUnobstructed(point, closest)) return true;
+    }
+    return false;
+}
+
 // Returns the smoke hook call count
 long long GetHitCount() { return g_hitCount.load(std::memory_order_relaxed); }
 
@@ -667,15 +705,14 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
     }
 
     const float density = g_getSmokeDensityInLine(from, to, nullptr);
+    const float adjustedDensity = AdjustClientDensity(from, to, density);
     const float threshold = GetDensityThreshold();
     const bool engineBlocked = density >= threshold;
-    const bool heCleared = HeVision::ClearsSegment(from, to);
-    const bool bulletCleared = BulletVision::GetHolesEnabled() && BulletVision::ClearsSegment(from, to);
-    const bool blocked = engineBlocked && !heCleared && !bulletCleared;
+    const bool blocked = adjustedDensity >= threshold;
     written += std::snprintf(buffer + written, bufferLength - written,
-                             "density=%.4f  threshold=%.4f  engineBlock=%d  heCleared=%d  bulletCleared=%d  blocked=%d  activeHoles=%d\n",
-                             density, threshold, engineBlocked ? 1 : 0, heCleared ? 1 : 0, bulletCleared ? 1 : 0, blocked ? 1 : 0,
-                             HeVision::GetActiveCount());
+                             "density=%.4f adjusted=%.4f threshold=%.4f engineBlock=%d blocked=%d activeHe=%d activeBullets=%d\n", density,
+                             adjustedDensity, threshold, engineBlocked ? 1 : 0, blocked ? 1 : 0, HeVision::GetActiveCount(),
+                             BulletVision::GetActiveHoleCount());
     return written;
 }
 } // namespace cs2bv::SmokeVision

@@ -7,6 +7,8 @@
 #include <nlohmann/json.hpp>
 
 namespace cs2bv::HeVision {
+using DensitySamplerFn = float (*)(const float* from, const float* to);
+
 // Resolves and installs the optional HE detonation hook
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule);
 
@@ -16,8 +18,8 @@ void Remove();
 // Records an HE detonation as an active smoke hole
 void OnDetonate(float x, float y, float z);
 
-// Tests whether a line passes through an active HE hole
-bool ClearsSegment(const float* from, const float* to);
+// Applies the HE smoke-hole model to native line density
+float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler);
 
 // Sets the initial HE hole radius
 void SetRadius(float value);

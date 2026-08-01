@@ -27,6 +27,9 @@ bool HasSmokeProjectiles();
 // Returns engine smoke density for a line or zero when unavailable
 float DensityInLine(const float* from, const float* to);
 
+// Checks whether native smoke density exists near a point
+bool HasSmokeNearPoint(const float* point, float radius);
+
 // Returns the number of smoke hook calls
 long long GetHitCount();
 

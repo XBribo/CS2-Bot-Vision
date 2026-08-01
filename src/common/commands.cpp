@@ -14,7 +14,7 @@ namespace cs2bv::commands {
 
 IVEngineServer2* g_pEngine = nullptr;
 
-// Prints formatted text to the invoking client or server console
+// Prints formatted text to the invoking console
 void PrintToCaller(const CCommandContext& context, const char* fmt, ...)
 {
     char buf[1024];
@@ -217,7 +217,7 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
 }
 
 // Reads or changes the HE hole radius
-CON_COMMAND_F(bv_he_radius, "bv_he_radius <r>  HE smoke-hole radius in units (default 200).", FCVAR_NONE)
+CON_COMMAND_F(bv_he_radius, "bv_he_radius <r>  HE smoke influence radius in units (default 250).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -231,7 +231,7 @@ CON_COMMAND_F(bv_he_radius, "bv_he_radius <r>  HE smoke-hole radius in units (de
 }
 
 // Reads or changes the HE hole lifetime
-CON_COMMAND_F(bv_he_duration, "bv_he_duration <s>  HE smoke-hole lifetime in seconds (default 3.5).", FCVAR_NONE)
+CON_COMMAND_F(bv_he_duration, "bv_he_duration <s>  HE smoke-hole lifetime in seconds (default 5).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -245,7 +245,7 @@ CON_COMMAND_F(bv_he_duration, "bv_he_duration <s>  HE smoke-hole lifetime in sec
 }
 
 // Reads or changes the normal bullet tunnel radius
-CON_COMMAND_F(bv_bullet_radius, "bv_bullet_radius <r>  bullet capsule-hole radius in units (default 12).", FCVAR_NONE)
+CON_COMMAND_F(bv_bullet_radius, "bv_bullet_radius <r>  bullet capsule-hole radius in units (default 20).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -259,7 +259,7 @@ CON_COMMAND_F(bv_bullet_radius, "bv_bullet_radius <r>  bullet capsule-hole radiu
 }
 
 // Reads or changes the shotgun bullet tunnel radius
-CON_COMMAND_F(bv_bullet_radius_shotgun, "bv_bullet_radius_shotgun <r>  shotgun bullet-hole radius in units (default 28).", FCVAR_NONE)
+CON_COMMAND_F(bv_bullet_radius_shotgun, "bv_bullet_radius_shotgun <r>  shotgun bullet-hole radius in units (default 80).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -273,7 +273,7 @@ CON_COMMAND_F(bv_bullet_radius_shotgun, "bv_bullet_radius_shotgun <r>  shotgun b
 }
 
 // Reads or changes the bullet tunnel lifetime
-CON_COMMAND_F(bv_bullet_duration, "bv_bullet_duration <s>  bullet hole lifetime in seconds (default 0.2).", FCVAR_NONE)
+CON_COMMAND_F(bv_bullet_duration, "bv_bullet_duration <s>  bullet hole lifetime in seconds (default 1).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {

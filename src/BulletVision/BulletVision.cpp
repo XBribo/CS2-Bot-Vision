@@ -9,11 +9,13 @@
 #include "platform.h"
 #include "raytrace_iface.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 namespace cs2bv::BulletVision {
@@ -23,6 +25,14 @@ struct BulletHole
     float end[3];
     float startTime;
     float radius;
+};
+
+struct BulletInfluence
+{
+    BulletHole hole;
+    float age;
+    float begin;
+    float end;
 };
 
 struct WeaponDefinitionCacheEntry
@@ -56,8 +66,9 @@ using GetSlotFn = void*(__fastcall*)(void* weaponServices, int slot, unsigned in
 
 static constexpr const char* kPelletTraceName = "BulletPelletTrace";
 static constexpr const char* kGetSlotName = "CCSPlayer_WeaponServices::GetSlot";
-static constexpr size_t kMaxBulletHoles = 64;
+static constexpr size_t kMaxBulletHoles = 16;
 static constexpr size_t kWeaponCacheSize = 64;
+static constexpr int kDensitySlices = 5;
 
 static PelletTraceFn g_originalPelletTrace = nullptr;
 static GetSlotFn g_getSlot = nullptr;
@@ -73,9 +84,9 @@ static int g_entityHandleOffset = 0x10;
 
 static std::mutex g_holeMutex;
 static std::vector<BulletHole> g_holes;
-static std::atomic<int> g_radiusMilli{ 12000 };
-static std::atomic<int> g_shotgunRadiusMilli{ 28000 };
-static std::atomic<int> g_durationMilli{ 150 };
+static std::atomic<int> g_radiusMilli{ 20000 };
+static std::atomic<int> g_shotgunRadiusMilli{ 80000 };
+static std::atomic<int> g_durationMilli{ 1000 };
 static std::atomic<int> g_rangeMilli{ 8192000 };
 static std::atomic<int> g_holesEnabled{ 1 };
 
@@ -119,6 +130,45 @@ static float DistanceSquaredToSegment(const float point[3], const float start[3]
 
     float closest[3] = { start[0] + segment[0] * amount, start[1] + segment[1] * amount, start[2] + segment[2] * amount };
     float delta[3] = { point[0] - closest[0], point[1] - closest[1], point[2] - closest[2] };
+    return delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+}
+
+// Clamps a scalar to the normalized range
+static float Saturate(float value)
+{
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+// Evaluates the shader smoothstep polynomial
+static float SmoothStep(float value)
+{
+    const float amount = Saturate(value);
+    return amount * amount * (3.0f - 2.0f * amount);
+}
+
+// Finds the closest parameters between two finite segments
+static float ClosestSegmentParameters(const float firstStart[3], const float firstEnd[3], const float secondStart[3],
+                                      const float secondEnd[3], float& firstAmount, float& secondAmount)
+{
+    const float first[3] = { firstEnd[0] - firstStart[0], firstEnd[1] - firstStart[1], firstEnd[2] - firstStart[2] };
+    const float second[3] = { secondEnd[0] - secondStart[0], secondEnd[1] - secondStart[1], secondEnd[2] - secondStart[2] };
+    const float offset[3] = { firstStart[0] - secondStart[0], firstStart[1] - secondStart[1], firstStart[2] - secondStart[2] };
+    const float firstLengthSquared = first[0] * first[0] + first[1] * first[1] + first[2] * first[2];
+    const float secondLengthSquared = second[0] * second[0] + second[1] * second[1] + second[2] * second[2];
+    const float cross = first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
+    const float firstOffset = first[0] * offset[0] + first[1] * offset[1] + first[2] * offset[2];
+    const float secondOffset = second[0] * offset[0] + second[1] * offset[1] + second[2] * offset[2];
+    const float denominator = firstLengthSquared * secondLengthSquared - cross * cross;
+
+    firstAmount = denominator > 0.001f ? Saturate((cross * secondOffset - firstOffset * secondLengthSquared) / denominator) : 0.0f;
+    secondAmount = secondLengthSquared > 0.001f ? Saturate((cross * firstAmount + secondOffset) / secondLengthSquared) : 0.0f;
+    firstAmount = firstLengthSquared > 0.001f ? Saturate((cross * secondAmount - firstOffset) / firstLengthSquared) : 0.0f;
+
+    const float firstPoint[3] = { firstStart[0] + first[0] * firstAmount, firstStart[1] + first[1] * firstAmount,
+                                  firstStart[2] + first[2] * firstAmount };
+    const float secondPoint[3] = { secondStart[0] + second[0] * secondAmount, secondStart[1] + second[1] * secondAmount,
+                                   secondStart[2] + second[2] * secondAmount };
+    const float delta[3] = { firstPoint[0] - secondPoint[0], firstPoint[1] - secondPoint[1], firstPoint[2] - secondPoint[2] };
     return delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
 }
 
@@ -373,6 +423,20 @@ void SetRayTrace(void* rayTrace, int returnCode)
 // Checks whether external ray tracing is available
 bool RayTraceReady() { return g_rayTrace != nullptr; }
 
+// Tests a line with the HE-to-smoke collision mask
+bool IsLineUnobstructed(const float* from, const float* to)
+{
+    if (!from || !to || !g_rayTrace) return true;
+
+    rt::Vector start{ from[0], from[1], from[2] };
+    rt::Vector end{ to[0], to[1], to[2] };
+    rt::TraceOptions options;
+    options.InteractsWith = 8193;
+    rt::TraceResult result;
+    const bool traceHit = g_rayTrace->TraceEndShape(&start, &end, nullptr, &options, &result);
+    return !traceHit || result.Fraction >= 0.999f;
+}
+
 // Adds or replaces one temporary bullet tunnel
 void OnHole(const float start[3], const float end[3], float radius)
 {
@@ -406,30 +470,144 @@ void OnHole(const float start[3], const float end[3], float radius)
     g_holes[oldest].radius = radius;
 }
 
-// Removes expired tunnels and tests the bot eye against them
-bool ClearsSegment(const float* from, const float* /*to*/)
+// Applies active bullet records to native density near each tunnel
+float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler)
 {
     const float duration = GetDuration();
-    if (duration <= 0.0f) return false;
+    if (!from || !to || !sampler || density <= 0.0f || duration <= 0.0f) return density;
+
+    const float line[3] = { to[0] - from[0], to[1] - from[1], to[2] - from[2] };
+    const float lineLengthSquared = line[0] * line[0] + line[1] * line[1] + line[2] * line[2];
+    if (lineLengthSquared <= 0.001f) return density;
+    const float lineLength = std::sqrt(lineLengthSquared);
 
     const float now = game_time::Now();
     std::lock_guard<std::mutex> lock(g_holeMutex);
-    bool cleared = false;
+    std::vector<BulletInfluence> influences;
+    influences.reserve(g_holes.size());
     size_t writeIndex = 0;
     for (size_t index = 0; index < g_holes.size(); ++index)
     {
-        const float age = now - g_holes[index].startTime;
+        const BulletHole holeRecord = g_holes[index];
+        const float age = now - holeRecord.startTime;
         if (age < 0.0f || age >= duration) continue;
 
-        g_holes[writeIndex++] = g_holes[index];
-        const float radius = g_holes[index].radius;
-        if (radius > 0.0f && DistanceSquaredToSegment(from, g_holes[index].start, g_holes[index].end) <= radius * radius)
+        g_holes[writeIndex++] = holeRecord;
+        const float radius = holeRecord.radius;
+        if (radius <= 0.0f) continue;
+
+        BulletHole shaderHole = holeRecord;
+        const float travelAmount = std::min(age * 10.0f, 1.0f);
+        for (int axis = 0; axis < 3; ++axis)
         {
-            cleared = true;
+            shaderHole.end[axis] = holeRecord.start[axis] + (holeRecord.end[axis] - holeRecord.start[axis]) * travelAmount;
         }
+
+        float lineAmount = 0.0f;
+        float holeAmount = 0.0f;
+        const float distanceSquared = ClosestSegmentParameters(from, to, shaderHole.start, shaderHole.end, lineAmount, holeAmount);
+        if (distanceSquared >= radius * radius) continue;
+
+        const float hole[3] = { shaderHole.end[0] - shaderHole.start[0], shaderHole.end[1] - shaderHole.start[1],
+                                shaderHole.end[2] - shaderHole.start[2] };
+        const float holeLengthSquared = hole[0] * hole[0] + hole[1] * hole[1] + hole[2] * hole[2];
+        const float directionDot = holeLengthSquared > 0.001f
+                                       ? std::clamp((line[0] * hole[0] + line[1] * hole[1] + line[2] * hole[2]) /
+                                                        (lineLength * std::sqrt(holeLengthSquared)),
+                                                    -1.0f, 1.0f)
+                                       : 0.0f;
+
+        float begin = 0.0f;
+        float end = 0.0f;
+        if (std::abs(directionDot) > 0.95f)
+        {
+            const float startOffset[3] = { shaderHole.start[0] - from[0], shaderHole.start[1] - from[1], shaderHole.start[2] - from[2] };
+            const float endOffset[3] = { shaderHole.end[0] - from[0], shaderHole.end[1] - from[1], shaderHole.end[2] - from[2] };
+            const float startAmount = (startOffset[0] * line[0] + startOffset[1] * line[1] + startOffset[2] * line[2]) / lineLengthSquared;
+            const float endAmount = (endOffset[0] * line[0] + endOffset[1] * line[1] + endOffset[2] * line[2]) / lineLengthSquared;
+            const float padding = std::sqrt(radius * radius - distanceSquared) / lineLength;
+            begin = Saturate(std::min(startAmount, endAmount) - padding);
+            end = Saturate(std::max(startAmount, endAmount) + padding);
+        }
+        else
+        {
+            const float sine = std::sqrt(std::max(1.0f - directionDot * directionDot, 0.0f));
+            const float halfAmount = std::sqrt(radius * radius - distanceSquared) / (lineLength * sine);
+            begin = Saturate(lineAmount - halfAmount);
+            end = Saturate(lineAmount + halfAmount);
+        }
+
+        if (end > begin) influences.push_back({ shaderHole, age, begin, end });
     }
     g_holes.resize(writeIndex);
-    return cleared;
+    if (influences.empty()) return density;
+
+    std::sort(influences.begin(), influences.end(), [](const BulletInfluence& left, const BulletInfluence& right)
+    {
+        return left.begin < right.begin;
+    });
+
+    std::vector<std::pair<float, float>> intervals;
+    intervals.reserve(influences.size());
+    for (const BulletInfluence& influence : influences)
+    {
+        if (intervals.empty() || influence.begin > intervals.back().second + 0.0001f)
+        {
+            intervals.emplace_back(influence.begin, influence.end);
+        }
+        else
+        {
+            intervals.back().second = std::max(intervals.back().second, influence.end);
+        }
+    }
+
+    float sampledDensity = 0.0f;
+    float weightedDensity = 0.0f;
+    for (const std::pair<float, float>& interval : intervals)
+    {
+        for (int slice = 0; slice < kDensitySlices; ++slice)
+        {
+            const float sliceBeginAmount = interval.first + (interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices);
+            const float sliceEndAmount =
+                interval.first + (interval.second - interval.first) * (static_cast<float>(slice + 1) / kDensitySlices);
+            const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5f;
+            float sliceBegin[3] = { from[0] + line[0] * sliceBeginAmount, from[1] + line[1] * sliceBeginAmount,
+                                    from[2] + line[2] * sliceBeginAmount };
+            float sliceEnd[3] = { from[0] + line[0] * sliceEndAmount, from[1] + line[1] * sliceEndAmount,
+                                  from[2] + line[2] * sliceEndAmount };
+            const float midpoint[3] = { from[0] + line[0] * midpointAmount, from[1] + line[1] * midpointAmount,
+                                        from[2] + line[2] * midpointAmount };
+
+            float maximumStrength = 0.0f;
+            for (const BulletInfluence& influence : influences)
+            {
+                if (midpointAmount < influence.begin || midpointAmount > influence.end) continue;
+
+                const float distance = std::sqrt(DistanceSquaredToSegment(midpoint, influence.hole.start, influence.hole.end));
+                const float endpointDelta[3] = { midpoint[0] - influence.hole.end[0], midpoint[1] - influence.hole.end[1],
+                                                  midpoint[2] - influence.hole.end[2] };
+                const float endpointDistance = std::sqrt(endpointDelta[0] * endpointDelta[0] + endpointDelta[1] * endpointDelta[1] +
+                                                         endpointDelta[2] * endpointDelta[2]);
+                const float normalizedDistance = distance / influence.hole.radius;
+                const float endpointFade = std::min(endpointDistance * 0.01f, 1.0f);
+                const float strength =
+                    SmoothStep(1.0f - Saturate(normalizedDistance - endpointFade + 1.0f + influence.age / duration));
+                maximumStrength = std::max(maximumStrength, strength);
+            }
+            if (maximumStrength <= 0.001f) continue;
+
+            const float sliceDensity = std::max(sampler(sliceBegin, sliceEnd), 0.0f);
+            const float deformationStrength = maximumStrength * maximumStrength * maximumStrength;
+            sampledDensity += sliceDensity;
+            weightedDensity += sliceDensity * (1.0f - deformationStrength);
+        }
+    }
+
+    if (sampledDensity <= 0.0001f) return density;
+
+    const float averageScale = Saturate(weightedDensity / sampledDensity);
+    const float affectedDensity = std::min(sampledDensity, density);
+    return std::max(density - affectedDensity * (1.0f - averageScale), 0.0f);
 }
 
 // Stores the normal tunnel radius
