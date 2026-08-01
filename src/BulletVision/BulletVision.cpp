@@ -8,6 +8,9 @@
 #include "memory.h"
 #include "platform.h"
 #include "raytrace_iface.h"
+#include "schema_resolver.h"
+
+#include <entity2/entityinstance.h>
 
 #include <algorithm>
 #include <atomic>
@@ -76,11 +79,9 @@ static Hook g_pelletTraceHook;
 static rt::CRayTraceInterface* g_rayTrace = nullptr;
 static int g_rayTraceReturnCode = -999;
 
-static int g_weaponServicesOffset = 0xA30;
-static int g_activeWeaponOffset = 0x60;
-static int g_itemDefinitionIndexOffset = 0xA00;
-static int g_entityIdentityOffset = 0x10;
-static int g_entityHandleOffset = 0x10;
+static int g_weaponServicesOffset = -1;
+static int g_activeWeaponOffset = -1;
+static int g_itemDefinitionIndexOffset = -1;
 
 static std::mutex g_holeMutex;
 static std::vector<BulletHole> g_holes;
@@ -175,7 +176,7 @@ static float ClosestSegmentParameters(const float firstStart[3], const float fir
 // Resolves the active weapon definition through weapon services
 static int ActiveWeaponDefinition(void* pawn)
 {
-    if (!pawn || !g_getSlot) return -1;
+    if (!pawn || !g_getSlot || g_weaponServicesOffset < 0 || g_activeWeaponOffset < 0 || g_itemDefinitionIndexOffset < 0) return -1;
 
     void* weaponServices = nullptr;
     if (!memory::Read(pawn, g_weaponServicesOffset, weaponServices, memory::FailureDomain::Weapon) || !weaponServices) return -1;
@@ -194,12 +195,8 @@ static int ActiveWeaponDefinition(void* pawn)
             void* weapon = g_getSlot(weaponServices, slot, positionArgument);
             if (!weapon) continue;
 
-            void* identity = nullptr;
-            if (!memory::Read(weapon, g_entityIdentityOffset, identity, memory::FailureDomain::Weapon) || !identity) continue;
-
-            uint32_t handle = 0;
-            if (!memory::Read(identity, g_entityHandleOffset, handle, memory::FailureDomain::Weapon)) continue;
-            if (static_cast<int>(handle & 0x7FFFu) != activeIndex) continue;
+            const CEntityHandle handle = static_cast<CEntityInstance*>(weapon)->GetRefEHandle();
+            if (handle.GetEntryIndex() != activeIndex) continue;
 
             uint16_t definitionIndex = 0;
             if (!memory::Read(weapon, g_itemDefinitionIndexOffset, definitionIndex, memory::FailureDomain::Weapon)) return -1;
@@ -356,11 +353,19 @@ static __int64 __fastcall HookedPelletTrace(__int64 a1,
 // Resolves offsets and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
 {
-    g_weaponServicesOffset = sig::ResolveOffset(gamedata, "CBasePlayerPawn::m_pWeaponServices", g_weaponServicesOffset);
-    g_activeWeaponOffset = sig::ResolveOffset(gamedata, "CPlayer_WeaponServices::m_hActiveWeapon", g_activeWeaponOffset);
-    g_itemDefinitionIndexOffset = sig::ResolveOffset(gamedata, "CBasePlayerWeapon::m_iItemDefinitionIndex", g_itemDefinitionIndexOffset);
-    g_entityIdentityOffset = sig::ResolveOffset(gamedata, "CEntityInstance::m_pEntity", g_entityIdentityOffset);
-    g_entityHandleOffset = g_entityIdentityOffset;
+    g_weaponServicesOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_pWeaponServices");
+    g_activeWeaponOffset = schema::GetFieldOffset("CPlayer_WeaponServices", "m_hActiveWeapon");
+    const int attributeManagerOffset = schema::GetFieldOffset("CBasePlayerWeapon", "m_AttributeManager");
+    const int itemOffset = schema::GetFieldOffset("CAttributeContainer", "m_Item");
+    const int definitionIndexOffset = schema::GetFieldOffset("CEconItemView", "m_iItemDefinitionIndex");
+    g_itemDefinitionIndexOffset = attributeManagerOffset >= 0 && itemOffset >= 0 && definitionIndexOffset >= 0
+                                      ? attributeManagerOffset + itemOffset + definitionIndexOffset
+                                      : -1;
+
+    char offsetMessage[192];
+    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] weapon schema offsets: services=0x%X active=0x%X definition=0x%X\n",
+                  g_weaponServicesOffset, g_activeWeaponOffset, g_itemDefinitionIndexOffset);
+    platform::DebugOut(offsetMessage);
 
     char pelletError[256] = { 0 };
     void* pelletTarget = sig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
@@ -386,7 +391,8 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     }
 
     char getSlotError[256] = { 0 };
-    void* getSlotTarget = sig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError));
+    const bool weaponOffsetsReady = g_weaponServicesOffset >= 0 && g_activeWeaponOffset >= 0 && g_itemDefinitionIndexOffset >= 0;
+    void* getSlotTarget = weaponOffsetsReady ? sig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
     if (getSlotTarget)
     {
         g_getSlot = reinterpret_cast<GetSlotFn>(getSlotTarget);
@@ -397,7 +403,8 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     else
     {
         char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", getSlotError);
+        const char* reason = weaponOffsetsReady ? getSlotError : "weapon schema offset unavailable";
+        std::snprintf(warning, sizeof(warning), "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", reason);
         platform::DebugOut(warning);
     }
     return installed;

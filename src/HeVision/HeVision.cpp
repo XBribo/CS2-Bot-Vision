@@ -7,6 +7,7 @@
 #include "hook.h"
 #include "memory.h"
 #include "platform.h"
+#include "schema_resolver.h"
 
 #include <algorithm>
 #include <atomic>
@@ -43,9 +44,9 @@ static constexpr int kDensitySlices = 5;
 static HeDetonateFn g_originalDetonate = nullptr;
 static Hook g_detonateHook;
 
-static int g_bodyComponentOffset = 0x30;
-static int g_sceneNodeOffset = 0x8;
-static int g_absOriginOffset = 200;
+static int g_bodyComponentOffset = -1;
+static int g_sceneNodeOffset = -1;
+static int g_absOriginOffset = -1;
 
 static std::mutex g_blastMutex;
 static std::vector<HeBlast> g_blasts;
@@ -105,9 +106,20 @@ static __int64 __fastcall HookedDetonate(void* self)
 // Resolves offsets and installs the optional HE detonation hook
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
 {
-    g_bodyComponentOffset = sig::ResolveOffset(gamedata, "CBaseEntity::m_CBodyComponent", g_bodyComponentOffset);
-    g_sceneNodeOffset = sig::ResolveOffset(gamedata, "CBodyComponent::m_pSceneNode", g_sceneNodeOffset);
-    g_absOriginOffset = sig::ResolveOffset(gamedata, "CGameSceneNode::m_vecAbsOrigin", g_absOriginOffset);
+    g_bodyComponentOffset = schema::GetFieldOffset("CBaseEntity", "m_CBodyComponent");
+    g_sceneNodeOffset = schema::GetFieldOffset("CBodyComponent", "m_pSceneNode");
+    g_absOriginOffset = schema::GetFieldOffset("CGameSceneNode", "m_vecAbsOrigin");
+    if (g_bodyComponentOffset < 0 || g_sceneNodeOffset < 0 || g_absOriginOffset < 0)
+    {
+        platform::DebugOut("[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
+        g_listenerStatus = "schema=FAIL";
+        return false;
+    }
+
+    char offsetMessage[160];
+    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] HE schema offsets: body=0x%X scene=0x%X origin=0x%X\n",
+                  g_bodyComponentOffset, g_sceneNodeOffset, g_absOriginOffset);
+    platform::DebugOut(offsetMessage);
 
     char error[256] = { 0 };
     void* target = sig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));

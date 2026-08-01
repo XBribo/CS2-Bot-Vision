@@ -8,6 +8,7 @@
 #include "game_time.h"
 #include "memory.h"
 #include "platform.h"
+#include "schema_resolver.h"
 #include "sig_scan.h"
 
 #include <nlohmann/json.hpp>
@@ -43,6 +44,15 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         std::snprintf(message, sizeof(message), "[BotVision] could not resolve CS2 server module from interface ptr=%p\n", serverInterface);
         platform::DebugOut(message);
         return false;
+    }
+
+    if (schema::Init())
+    {
+        platform::DebugOut("[BotVision] SchemaSystem ready; schema offsets resolve at runtime\n");
+    }
+    else
+    {
+        platform::DebugOut("[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
     }
 
     if (!SmokeVision::Install(gamedata, serverModule, error, maxLength)) return false;

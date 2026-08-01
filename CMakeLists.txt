@@ -99,6 +99,7 @@ add_library(
     src/common/game_time.cpp
     src/common/memory.cpp
     src/common/platform.cpp
+    src/common/schema_resolver.cpp
     src/common/sig_scan.cpp
     ${PROTO_SRCS}
     ${SDK_SOURCES}

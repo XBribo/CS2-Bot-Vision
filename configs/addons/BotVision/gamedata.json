@@ -64,67 +64,11 @@
     },
     "comment": "CCSBot::IsVisible(player)."
   },
-  "CBaseEntity::m_CBodyComponent": {
-    "offsets": {
-      "windows": 48,
-      "linux": 0
-    },
-    "comment": "CBaseEntity -> CBodyComponent* (0x30)."
-  },
-  "CBodyComponent::m_pSceneNode": {
-    "offsets": {
-      "windows": 8,
-      "linux": 0
-    },
-    "comment": "CBodyComponent -> CGameSceneNode* (0x8)."
-  },
-  "CGameSceneNode::m_vecAbsOrigin": {
-    "offsets": {
-      "windows": 200,
-      "linux": 0
-    },
-    "comment": "CGameSceneNode -> abs origin Vector."
-  },
-  "CBasePlayerPawn::m_hController": {
-    "offsets": {
-      "windows": 2992,
-      "linux": 0
-    },
-    "comment": "pawn -> controller handle (0xB80)."
-  },
   "Bot::m_pPlayer": {
     "offsets": {
       "windows": 24,
       "linux": 0
     },
     "comment": "CBot base object -> player pawn ptr (0x18)."
-  },
-  "CBasePlayerPawn::m_pWeaponServices": {
-    "offsets": {
-      "windows": 2608,
-      "linux": 0
-    },
-    "comment": "pawn -> WeaponServices (0xA00)."
-  },
-  "CPlayer_WeaponServices::m_hActiveWeapon": {
-    "offsets": {
-      "windows": 96,
-      "linux": 0
-    },
-    "comment": "WeaponServices -> active weapon handle (0x60)."
-  },
-  "CBasePlayerWeapon::m_iItemDefinitionIndex": {
-    "offsets": {
-      "windows": 2560,
-      "linux": 0
-    },
-    "comment": "Flattened weapon-relative item definition index (0xA00)."
-  },
-  "CEntityInstance::m_pEntity": {
-    "offsets": {
-      "windows": 16,
-      "linux": 0
-    },
-    "comment": "entity -> identity (0x10); identity -> ehandle (0x10)."
   }
 }

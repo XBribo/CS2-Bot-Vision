@@ -7,6 +7,7 @@
 #include "hook.h"
 #include "memory.h"
 #include "platform.h"
+#include "schema_resolver.h"
 
 #include <atomic>
 #include <climits>
@@ -46,8 +47,8 @@ static std::string g_hookedStatus = "not_attempted";
 static std::atomic<int> g_smokeMode{ 0 };
 static std::atomic<int> g_densityThresholdMilli{ 200 };
 
-static int g_controllerHandleOffset = 0xBB0;
-static int g_playerInBotOffset = 0x18;
+static int g_controllerHandleOffset = -1;
+static int g_playerInBotOffset = -1;
 static std::atomic<int> g_botThresholdMilli[kMaxBots];
 static std::atomic<int> g_botThresholdOverrideCount{ 0 };
 static std::atomic<unsigned int> g_cacheGeneration{ 1 };
@@ -251,7 +252,7 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
 // Resolves a bot engine slot through its pawn controller handle
 static int BotSlotFromBot(__int64 bot)
 {
-    if (!bot) return -1;
+    if (!bot || g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) return -1;
 
     __int64 pawn = 0;
     if (!memory::Read(reinterpret_cast<const void*>(bot), g_playerInBotOffset, pawn, memory::FailureDomain::Bot)) return -1;
@@ -273,7 +274,7 @@ static int BotSlotFromBot(__int64 bot)
 // Checks and latches one player from the reveal slot mask
 static bool IsRevealedPlayer(void* player, unsigned long long revealMask)
 {
-    if (revealMask == 0 || !player) return false;
+    if (revealMask == 0 || !player || g_controllerHandleOffset < 0) return false;
 
     uint32_t handle = 0;
     std::memcpy(&handle, static_cast<const unsigned char*>(player) + g_controllerHandleOffset, sizeof(handle));
@@ -429,8 +430,13 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     g_cacheGeneration.fetch_add(1, std::memory_order_relaxed);
     g_revealMask.store(0, std::memory_order_relaxed);
 
-    g_controllerHandleOffset = sig::ResolveOffset(gamedata, "CBasePlayerPawn::m_hController", g_controllerHandleOffset);
-    g_playerInBotOffset = sig::ResolveOffset(gamedata, "Bot::m_pPlayer", g_playerInBotOffset);
+    g_controllerHandleOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_hController");
+    g_playerInBotOffset = sig::ResolveOffset(gamedata, "Bot::m_pPlayer", -1);
+
+    char offsetMessage[160];
+    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] offsets: CBasePlayerPawn::m_hController=0x%X Bot::m_pPlayer=0x%X\n",
+                  g_controllerHandleOffset, g_playerInBotOffset);
+    platform::DebugOut(offsetMessage);
 
     char signatureError[256] = { 0 };
     void* target = sig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
@@ -477,8 +483,9 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 
     char visibleError[256] = { 0 };
     bool chainedDetour = false;
-    void* visibleTarget =
-        ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError));
+    void* visibleTarget = g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
+                              ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError))
+                              : nullptr;
     if (visibleTarget &&
         g_visiblePosHook.Create(visibleTarget, reinterpret_cast<void*>(&HookedIsVisiblePos),
                                 reinterpret_cast<void**>(&g_originalIsVisiblePos)) &&
@@ -493,15 +500,20 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         g_visiblePosHook.Remove();
         g_originalIsVisiblePos = nullptr;
         char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n",
-                      visibleTarget ? "funchook error" : visibleError);
+        const char* reason = g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0
+                                 ? "required offset unavailable"
+                                 : (visibleTarget ? "funchook error" : visibleError);
+        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
         platform::DebugOut(warning);
     }
 
     char visiblePlayerError[256] = { 0 };
     bool chainedPlayerDetour = false;
-    void* visiblePlayerTarget = ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour,
-                                                          visiblePlayerError, sizeof(visiblePlayerError));
+    void* visiblePlayerTarget =
+        g_controllerHandleOffset >= 0
+            ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour, visiblePlayerError,
+                                        sizeof(visiblePlayerError))
+            : nullptr;
     if (visiblePlayerTarget &&
         g_visiblePlayerHook.Create(visiblePlayerTarget, reinterpret_cast<void*>(&HookedIsVisiblePlayer),
                                    reinterpret_cast<void**>(&g_originalIsVisiblePlayer)) &&
@@ -516,8 +528,9 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         g_visiblePlayerHook.Remove();
         g_originalIsVisiblePlayer = nullptr;
         char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n",
-                      visiblePlayerTarget ? "funchook error" : visiblePlayerError);
+        const char* reason = g_controllerHandleOffset < 0 ? "required offset unavailable"
+                                                          : (visiblePlayerTarget ? "funchook error" : visiblePlayerError);
+        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
         platform::DebugOut(warning);
     }
     return true;
