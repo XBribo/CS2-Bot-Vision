@@ -55,7 +55,7 @@ class BotVisionPlugin : public ISmmPlugin
     const char* GetLicense() override { return "AGPL3.0"; }
 
     // Returns plugin version metadata
-    const char* GetVersion() override { return "0.2.1"; }
+    const char* GetVersion() override { return "0.2.2"; }
 
     // Returns plugin build date metadata
     const char* GetDate() override { return __DATE__; }
