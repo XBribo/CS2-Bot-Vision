@@ -94,7 +94,7 @@ CON_COMMAND_F(bv_smoke_mode, "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke."
 }
 
 // Reads or changes the global density threshold
-CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold on density (default 0.2).", FCVAR_NONE)
+CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold on density (default 0.3).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -214,76 +214,6 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
         cs2bv::BotVision::RemoveRevealSlot(slot);
         cs2bv::commands::PrintToCaller(context, "smoke reveal removed: slot %d\n", slot);
     }
-}
-
-// Reads or changes the HE hole radius
-CON_COMMAND_F(bv_he_radius, "bv_he_radius <r>  HE smoke influence radius in units (default 250).", FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current HE hole radius = %.1f\n", cs2bv::BotVision::GetHeRadius());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetHeRadius(v);
-    cs2bv::commands::PrintToCaller(context, "HE hole radius set to %.1f\n", cs2bv::BotVision::GetHeRadius());
-}
-
-// Reads or changes the HE hole lifetime
-CON_COMMAND_F(bv_he_duration, "bv_he_duration <s>  HE smoke-hole lifetime in seconds (default 5).", FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current HE hole duration = %.2f\n", cs2bv::BotVision::GetHeDuration());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetHeDuration(v);
-    cs2bv::commands::PrintToCaller(context, "HE hole duration set to %.2f\n", cs2bv::BotVision::GetHeDuration());
-}
-
-// Reads or changes the normal bullet tunnel radius
-CON_COMMAND_F(bv_bullet_radius, "bv_bullet_radius <r>  bullet capsule-hole radius in units (default 20).", FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current bullet hole radius = %.1f\n", cs2bv::BotVision::GetBulletRadius());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetBulletRadius(v);
-    cs2bv::commands::PrintToCaller(context, "bullet hole radius set to %.1f\n", cs2bv::BotVision::GetBulletRadius());
-}
-
-// Reads or changes the shotgun bullet tunnel radius
-CON_COMMAND_F(bv_bullet_radius_shotgun, "bv_bullet_radius_shotgun <r>  shotgun bullet-hole radius in units (default 80).", FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current shotgun bullet hole radius = %.1f\n", cs2bv::BotVision::GetBulletRadiusShotgun());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetBulletRadiusShotgun(v);
-    cs2bv::commands::PrintToCaller(context, "shotgun bullet hole radius set to %.1f\n", cs2bv::BotVision::GetBulletRadiusShotgun());
-}
-
-// Reads or changes the bullet tunnel lifetime
-CON_COMMAND_F(bv_bullet_duration, "bv_bullet_duration <s>  bullet hole lifetime in seconds (default 1).", FCVAR_NONE)
-{
-    if (args.ArgC() < 2)
-    {
-        cs2bv::commands::PrintToCaller(context, "current bullet hole duration = %.2f\n", cs2bv::BotVision::GetBulletDuration());
-        return;
-    }
-    float v = (float)std::atof(args.Arg(1));
-    if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetBulletDuration(v);
-    cs2bv::commands::PrintToCaller(context, "bullet hole duration set to %.2f\n", cs2bv::BotVision::GetBulletDuration());
 }
 
 // Enables or disables bullet smoke tunnels

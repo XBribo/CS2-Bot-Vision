@@ -45,7 +45,7 @@ static std::atomic<long long> g_hitCount{ 0 };
 static std::atomic<long long> g_blockedCount{ 0 };
 static std::string g_hookedStatus = "not_attempted";
 static std::atomic<int> g_smokeMode{ 0 };
-static std::atomic<int> g_densityThresholdMilli{ 200 };
+static std::atomic<int> g_densityThresholdMilli{ 300 };
 
 static int g_controllerHandleOffset = -1;
 static int g_playerInBotOffset = -1;
@@ -240,10 +240,6 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
     }
 
     g_autoListHead = static_cast<void**>(target);
-    char message[160];
-    std::snprintf(message, sizeof(message), "[BotVision] AutoList head @ %p (hook active)\n", target);
-    platform::DebugOut(message);
-
     char status[96];
     std::snprintf(status, sizeof(status), "ON@%p", target);
     g_hookedStatus = status;
@@ -433,11 +429,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     g_controllerHandleOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_hController");
     g_playerInBotOffset = sig::ResolveOffset(gamedata, "Bot::m_pPlayer", -1);
 
-    char offsetMessage[160];
-    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] offsets: CBasePlayerPawn::m_hController=0x%X Bot::m_pPlayer=0x%X\n",
-                  g_controllerHandleOffset, g_playerInBotOffset);
-    platform::DebugOut(offsetMessage);
-
     char signatureError[256] = { 0 };
     void* target = sig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
     if (!target)
@@ -445,11 +436,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         ReportError(error, maxLength, "%s", signatureError);
         return false;
     }
-
-    char message[160];
-    std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (RVA 0x%llX)\n", kSmokeFunctionName, target,
-                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(target) - reinterpret_cast<uintptr_t>(serverModule.Base)));
-    platform::DebugOut(message);
 
     ResolveAutoListHead(gamedata, serverModule);
     if (!g_smokeHook.Create(target, reinterpret_cast<void*>(&HookedIsVisibleThroughSmoke),
@@ -471,65 +457,58 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     if (densityTarget)
     {
         g_getSmokeDensityInLine = reinterpret_cast<GetSmokeDensityInLineFn>(densityTarget);
-        std::snprintf(message, sizeof(message), "[BotVision] GetSmokeDensityInLine @ %p (mode 0 active)\n", densityTarget);
-        platform::DebugOut(message);
     }
     else
     {
         char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] %s; mode 0 falls back to ball-smoke\n", densityError);
+        std::snprintf(warning, sizeof(warning), "[BotVision] %s; mode 0 falls back to vanilla-smoke\n", densityError);
         platform::DebugOut(warning);
     }
 
     char visibleError[256] = { 0 };
     bool chainedDetour = false;
-    void* visibleTarget = g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
-                              ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError))
-                              : nullptr;
+    void* visibleTarget =
+        g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
+            ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError))
+            : nullptr;
     if (visibleTarget &&
         g_visiblePosHook.Create(visibleTarget, reinterpret_cast<void*>(&HookedIsVisiblePos),
                                 reinterpret_cast<void**>(&g_originalIsVisiblePos)) &&
         g_visiblePosHook.Enable())
     {
-        std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (per-bot density active%s)\n", kVisiblePosName, visibleTarget,
-                      chainedDetour ? ", chained existing detour" : "");
-        platform::DebugOut(message);
+        (void)chainedDetour;
     }
     else
     {
         g_visiblePosHook.Remove();
         g_originalIsVisiblePos = nullptr;
         char warning[320];
-        const char* reason = g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0
-                                 ? "required offset unavailable"
-                                 : (visibleTarget ? "funchook error" : visibleError);
+        const char* reason = g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0 ? "required offset unavailable"
+                                                                                      : (visibleTarget ? "funchook error" : visibleError);
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
         platform::DebugOut(warning);
     }
 
     char visiblePlayerError[256] = { 0 };
     bool chainedPlayerDetour = false;
-    void* visiblePlayerTarget =
-        g_controllerHandleOffset >= 0
-            ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour, visiblePlayerError,
-                                        sizeof(visiblePlayerError))
-            : nullptr;
+    void* visiblePlayerTarget = g_controllerHandleOffset >= 0
+                                    ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour,
+                                                                visiblePlayerError, sizeof(visiblePlayerError))
+                                    : nullptr;
     if (visiblePlayerTarget &&
         g_visiblePlayerHook.Create(visiblePlayerTarget, reinterpret_cast<void*>(&HookedIsVisiblePlayer),
                                    reinterpret_cast<void**>(&g_originalIsVisiblePlayer)) &&
         g_visiblePlayerHook.Enable())
     {
-        std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (target reveal active%s)\n", kVisiblePlayerName, visiblePlayerTarget,
-                      chainedPlayerDetour ? ", chained existing detour" : "");
-        platform::DebugOut(message);
+        (void)chainedPlayerDetour;
     }
     else
     {
         g_visiblePlayerHook.Remove();
         g_originalIsVisiblePlayer = nullptr;
         char warning[320];
-        const char* reason = g_controllerHandleOffset < 0 ? "required offset unavailable"
-                                                          : (visiblePlayerTarget ? "funchook error" : visiblePlayerError);
+        const char* reason =
+            g_controllerHandleOffset < 0 ? "required offset unavailable" : (visiblePlayerTarget ? "funchook error" : visiblePlayerError);
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
         platform::DebugOut(warning);
     }
@@ -574,14 +553,20 @@ bool HasSmokeNearPoint(const float* point, float radius)
     if (!point || radius <= 0.0f) return false;
     if (!g_getSmokeDensityInLine) return HasSmokeProjectiles();
 
-    static constexpr float kDirections[][3] = {
-        { 1.0f, 0.0f, 0.0f },   { -1.0f, 0.0f, 0.0f },  { 0.0f, 1.0f, 0.0f },   { 0.0f, -1.0f, 0.0f },
-        { 0.0f, 0.0f, 1.0f },   { 0.0f, 0.0f, -1.0f },  { 0.57735f, 0.57735f, 0.57735f },
-        { 0.57735f, 0.57735f, -0.57735f },               { 0.57735f, -0.57735f, 0.57735f },
-        { 0.57735f, -0.57735f, -0.57735f },              { -0.57735f, 0.57735f, 0.57735f },
-        { -0.57735f, 0.57735f, -0.57735f },              { -0.57735f, -0.57735f, 0.57735f },
-        { -0.57735f, -0.57735f, -0.57735f }
-    };
+    static constexpr float kDirections[][3] = { { 1.0f, 0.0f, 0.0f },
+                                                { -1.0f, 0.0f, 0.0f },
+                                                { 0.0f, 1.0f, 0.0f },
+                                                { 0.0f, -1.0f, 0.0f },
+                                                { 0.0f, 0.0f, 1.0f },
+                                                { 0.0f, 0.0f, -1.0f },
+                                                { 0.57735f, 0.57735f, 0.57735f },
+                                                { 0.57735f, 0.57735f, -0.57735f },
+                                                { 0.57735f, -0.57735f, 0.57735f },
+                                                { 0.57735f, -0.57735f, -0.57735f },
+                                                { -0.57735f, 0.57735f, 0.57735f },
+                                                { -0.57735f, 0.57735f, -0.57735f },
+                                                { -0.57735f, -0.57735f, 0.57735f },
+                                                { -0.57735f, -0.57735f, -0.57735f } };
 
     for (const auto& direction : kDirections)
     {
@@ -713,7 +698,7 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
 
     if (!g_getSmokeDensityInLine)
     {
-        written += std::snprintf(buffer + written, bufferLength - written, "GetSmokeDensityInLine unresolved -> mode 0 is ball-smoke\n");
+        written += std::snprintf(buffer + written, bufferLength - written, "GetSmokeDensityInLine unresolved -> mode 0 is unavailable\n");
         return written;
     }
 

@@ -116,19 +116,11 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         return false;
     }
 
-    char offsetMessage[160];
-    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] HE schema offsets: body=0x%X scene=0x%X origin=0x%X\n",
-                  g_bodyComponentOffset, g_sceneNodeOffset, g_absOriginOffset);
-    platform::DebugOut(offsetMessage);
-
     char error[256] = { 0 };
     void* target = sig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
     if (target && g_detonateHook.Create(target, reinterpret_cast<void*>(&HookedDetonate), reinterpret_cast<void**>(&g_originalDetonate)) &&
         g_detonateHook.Enable())
     {
-        char message[160];
-        std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (HE holes active)\n", kHeDetonateName, target);
-        platform::DebugOut(message);
         g_listenerStatus = "hook=ok";
         return true;
     }

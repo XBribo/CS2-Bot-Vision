@@ -46,11 +46,7 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         return false;
     }
 
-    if (schema::Init())
-    {
-        platform::DebugOut("[BotVision] SchemaSystem ready; schema offsets resolve at runtime\n");
-    }
-    else
+    if (!schema::Init())
     {
         platform::DebugOut("[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
     }
@@ -59,7 +55,6 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
 
     HeVision::Install(gamedata, serverModule);
     BulletVision::Install(gamedata, serverModule);
-    platform::DebugOut("[BotVision] detour installed\n");
     return true;
 }
 

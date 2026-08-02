@@ -362,11 +362,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
                                       ? attributeManagerOffset + itemOffset + definitionIndexOffset
                                       : -1;
 
-    char offsetMessage[192];
-    std::snprintf(offsetMessage, sizeof(offsetMessage), "[BotVision] weapon schema offsets: services=0x%X active=0x%X definition=0x%X\n",
-                  g_weaponServicesOffset, g_activeWeaponOffset, g_itemDefinitionIndexOffset);
-    platform::DebugOut(offsetMessage);
-
     char pelletError[256] = { 0 };
     void* pelletTarget = sig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
     bool installed = false;
@@ -375,9 +370,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
                                  reinterpret_cast<void**>(&g_originalPelletTrace)) &&
         g_pelletTraceHook.Enable())
     {
-        char message[160];
-        std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (bullet capture active)\n", kPelletTraceName, pelletTarget);
-        platform::DebugOut(message);
         installed = true;
     }
     else
@@ -396,9 +388,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     if (getSlotTarget)
     {
         g_getSlot = reinterpret_cast<GetSlotFn>(getSlotTarget);
-        char message[160];
-        std::snprintf(message, sizeof(message), "[BotVision] %s @ %p (shotgun radius active)\n", kGetSlotName, getSlotTarget);
-        platform::DebugOut(message);
     }
     else
     {

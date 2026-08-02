@@ -21,21 +21,16 @@ BotVision evaluates smoke density, HE blast holes, and bullet holes before decid
 - `bv_smoke_mode <0|1>` - `0` uses volumetric smoke; `1` uses the stock
   ball-smoke calculation.
 - `bv_density_threshold <d>` - set the global smoke-density blocking
-  threshold.
+  threshold (default `0.3`).
 - `bv_bot_density [<slot> <d>]` - list, query, or set a per-bot density
   threshold; a negative value restores the global threshold.
 - `bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>` - query smoke density along
   a segment.
-- `bv_he_radius <r>` - set the HE smoke-hole radius.
-- `bv_he_duration <s>` - set the HE smoke-hole lifetime.
 - `bv_bullet_holes <0|1>` - enable or disable bullet smoke tunnels.
-- `bv_bullet_radius <r>` - set the normal bullet-tunnel radius.
-- `bv_bullet_radius_shotgun <r>` - set the shotgun bullet-tunnel radius.
-- `bv_bullet_duration <s>` - set the bullet-tunnel lifetime.
 
 ### Through-smoke reveal
 
-Slots range from `0` to `63`. 
+Slots range from `0` to `63`.
 
 ```text
 bv_reveal add 10
@@ -53,6 +48,8 @@ bv_reveal clear
 ------------------------------------------------------------------------
 
 ## Install
+
+Requirement: [RayTrace](https://github.com/FUNPLAY-pro-CS2/Ray-Trace)
 
 1. Download the latest Windows release from
    [GitHub Releases](https://github.com/XBribo/CS2-Bot-Vision/releases/latest):

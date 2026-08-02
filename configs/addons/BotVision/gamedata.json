@@ -44,7 +44,7 @@
     "signatures": {
       "library": "server",
       "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 54 41 56 41 57 48 83 EC 20 45 33 E4 45 8B F0",
-      "linux": "55 48 89 E5 41 57 41 56 41 55 41 54 53 89 F3 48 83 EC 08 48 63 77"
+      "linux": "55 48 89 E5 41 57 41 56 41 55 41 54 53 89 F3 48 83 EC ? 48 63 77"
     },
     "comment": "Returns weapon in slot N."
   },
