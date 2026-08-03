@@ -94,7 +94,7 @@ CON_COMMAND_F(bv_smoke_mode, "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke."
 }
 
 // Reads or changes the global density threshold
-CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold on density (default 0.3).", FCVAR_NONE)
+CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold on density (default 0.19).", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
