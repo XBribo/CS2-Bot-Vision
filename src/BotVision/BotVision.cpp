@@ -12,6 +12,7 @@
 #include "sig_scan.h"
 
 #include <nlohmann/json.hpp>
+#include <tier0/dbg.h>
 
 #include <cstdio>
 
@@ -29,11 +30,19 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         }
         char message[512];
         std::snprintf(message, sizeof(message), "[BotVision] failed to read/parse gamedata.json at %s\n", gamedataPath.c_str());
-        platform::DebugOut(message);
+        Msg("%s", message);
         return false;
     }
 
-    const sig::ModuleInfo serverModule = sig::ModuleFromInterfacePtr(serverInterface);
+    sig::ModuleInfo serverModule = sig::ModuleFromInterfacePtr(serverInterface);
+    if (!serverModule)
+    {
+#if defined(_WIN32)
+        serverModule = sig::ModuleFromName("server.dll");
+#else
+        serverModule = sig::ModuleFromName("libserver.so");
+#endif
+    }
     if (!serverModule)
     {
         if (error && maxLength > 0)
@@ -42,13 +51,13 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         }
         char message[256];
         std::snprintf(message, sizeof(message), "[BotVision] could not resolve CS2 server module from interface ptr=%p\n", serverInterface);
-        platform::DebugOut(message);
+        Msg("%s", message);
         return false;
     }
 
     if (!schema::Init())
     {
-        platform::DebugOut("[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
+        Msg("%s", "[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
     }
 
     if (!SmokeVision::Install(gamedata, serverModule, error, maxLength)) return false;
@@ -67,7 +76,7 @@ void Remove()
 
     char message[160];
     std::snprintf(message, sizeof(message), "[BotVision] removed: hits=%lld blocked=%lld\n", GetHitCount(), GetBlockedCount());
-    platform::DebugOut(message);
+    Msg("%s", message);
 }
 
 // Stores the engine interface for shared server time

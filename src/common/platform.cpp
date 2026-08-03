@@ -1,16 +1,18 @@
-// Windows platform helpers
+// Cross-platform plugin helpers
 
 #include "platform.h"
 
+#if defined(_WIN32)
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace cs2bv::platform {
-// Writes a message to the Windows debug sink
-void DebugOut(const char* message) { OutputDebugStringA(message); }
-
-// Resolves the module containing this function
+// Resolves the on-disk path of the module containing this function
 std::string SelfModulePath()
 {
+#if defined(_WIN32)
     HMODULE module = nullptr;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                             reinterpret_cast<LPCSTR>(&SelfModulePath), &module))
@@ -19,5 +21,10 @@ std::string SelfModulePath()
     char path[MAX_PATH] = { 0 };
     if (GetModuleFileNameA(module, path, MAX_PATH) == 0) return "";
     return std::string(path);
+#else
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<void*>(&SelfModulePath), &info) == 0 || !info.dli_fname) return "";
+    return std::string(info.dli_fname);
+#endif
 }
 } // namespace cs2bv::platform

@@ -11,6 +11,7 @@
 #include "schema_resolver.h"
 
 #include <entity2/entityinstance.h>
+#include <tier0/dbg.h>
 
 #include <algorithm>
 #include <atomic>
@@ -45,9 +46,9 @@ struct WeaponDefinitionCacheEntry
     int definitionIndex = -1;
 };
 
-using PelletTraceFn = __int64(__fastcall*)(__int64 a1,
+using PelletTraceFn = int64_t(CS2BV_FASTCALL*)(int64_t a1,
                                            void* a2,
-                                           __int64 a3,
+                                           int64_t a3,
                                            float a4,
                                            float a5,
                                            int a6,
@@ -55,17 +56,17 @@ using PelletTraceFn = __int64(__fastcall*)(__int64 a1,
                                            int a8,
                                            int a9,
                                            float a10,
-                                           __int64 a11,
+                                           int64_t a11,
                                            int* a12,
                                            float a13,
                                            float a14,
-                                           __int64 a15,
-                                           __int64 a16,
+                                           int64_t a15,
+                                           int64_t a16,
                                            int a17,
                                            int a18,
                                            void* a19,
-                                           __int64 a20);
-using GetSlotFn = void*(__fastcall*)(void* weaponServices, int slot, unsigned int position);
+                                           int64_t a20);
+using GetSlotFn = void*(CS2BV_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
 
 static constexpr const char* kPelletTraceName = "BulletPelletTrace";
 static constexpr const char* kGetSlotName = "CCSPlayer_WeaponServices::GetSlot";
@@ -224,9 +225,9 @@ static int CachedActiveWeaponDefinition(void* shooter)
 }
 
 // Calls the original pellet trace with its unmodified arguments
-static __int64 CallOriginalPelletTrace(__int64 a1,
+static int64_t CallOriginalPelletTrace(int64_t a1,
                                        void* a2,
-                                       __int64 a3,
+                                       int64_t a3,
                                        float a4,
                                        float a5,
                                        int a6,
@@ -234,24 +235,24 @@ static __int64 CallOriginalPelletTrace(__int64 a1,
                                        int a8,
                                        int a9,
                                        float a10,
-                                       __int64 a11,
+                                       int64_t a11,
                                        int* a12,
                                        float a13,
                                        float a14,
-                                       __int64 a15,
-                                       __int64 a16,
+                                       int64_t a15,
+                                       int64_t a16,
                                        int a17,
                                        int a18,
                                        void* a19,
-                                       __int64 a20)
+                                       int64_t a20)
 {
     return g_originalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
 }
 
 // Captures one pellet path before invoking the engine trace
-static __int64 __fastcall HookedPelletTrace(__int64 a1,
+static int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
                                             void* a2,
-                                            __int64 a3,
+                                            int64_t a3,
                                             float a4,
                                             float a5,
                                             int a6,
@@ -259,16 +260,16 @@ static __int64 __fastcall HookedPelletTrace(__int64 a1,
                                             int a8,
                                             int a9,
                                             float a10,
-                                            __int64 a11,
+                                            int64_t a11,
                                             int* a12,
                                             float a13,
                                             float a14,
-                                            __int64 a15,
-                                            __int64 a16,
+                                            int64_t a15,
+                                            int64_t a16,
                                             int a17,
                                             int a18,
                                             void* a19,
-                                            __int64 a20)
+                                            int64_t a20)
 {
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
     if (!GetHolesEnabled() || !SmokeVision::IsVolumeMode() || !g_rayTrace || !SmokeVision::HasSmokeProjectiles() || !a2 || !a3)
@@ -379,7 +380,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         char warning[320];
         std::snprintf(warning, sizeof(warning), "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
                       pelletTarget ? "funchook error" : pelletError);
-        platform::DebugOut(warning);
+        Msg("%s", warning);
     }
 
     char getSlotError[256] = { 0 };
@@ -394,7 +395,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         char warning[320];
         const char* reason = weaponOffsetsReady ? getSlotError : "weapon schema offset unavailable";
         std::snprintf(warning, sizeof(warning), "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", reason);
-        platform::DebugOut(warning);
+        Msg("%s", warning);
     }
     return installed;
 }

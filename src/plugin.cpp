@@ -9,6 +9,7 @@
 #include <eiface.h>
 #include <icvar.h>
 #include <convar.h>
+#include <tier0/dbg.h>
 #include <interfaces/interfaces.h>
 
 #include "BotVision/BotVision.h"
@@ -89,7 +90,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     cs2bv::commands::g_pEngine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bv::commands::g_pEngine)
     {
-        cs2bv::platform::DebugOut("[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
+        Msg("%s", "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
     }
 
     // Wires g_pCVar and registers every CON_COMMAND_F
@@ -130,7 +131,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     char message[96];
     std::snprintf(message, sizeof(message), "[BotVision] loaded successfully (density threshold %.3f)\n",
                   cs2bv::BotVision::GetDensityThreshold());
-    cs2bv::platform::DebugOut(message);
+    Msg("%s", message);
     return true;
 }
 
@@ -147,7 +148,7 @@ void BotVisionPlugin::TryFetchRayTrace(bool reportFailure)
         char message[160];
         std::snprintf(message, sizeof(message), "[BotVision] WARN: RayTrace %s unavailable (ret=%d)\n", RAYTRACE_INTERFACE_VERSION,
                       returnCode);
-        cs2bv::platform::DebugOut(message);
+        Msg("%s", message);
     }
 }
 
@@ -166,6 +167,6 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     g_pCVar = nullptr;
     cs2bv::commands::g_pEngine = nullptr;
     cs2bv::BotVision::SetEngine(nullptr);
-    cs2bv::platform::DebugOut("[BotVision] plugin unloaded\n");
+    Msg("%s", "[BotVision] plugin unloaded\n");
     return true;
 }

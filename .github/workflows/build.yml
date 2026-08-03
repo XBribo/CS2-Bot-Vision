@@ -84,7 +84,7 @@ jobs:
           HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
           MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
           CSGO_PROTO: ${{ github.workspace }}/deps/hl2sdk-cs2/common
-        run: ./build.ps1
+        run: ./build.ps1 -Windows
 
       - name: Verify package
         shell: bash
@@ -100,10 +100,65 @@ jobs:
           path: dist/windows/
           if-no-files-found: error
 
-  # Publishes the complete Windows package
+  # Builds and assembles the complete Linux package
+  linux:
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Checkout hl2sdk-cs2
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.HL2SDK_REPO }}
+          ref: ${{ env.HL2SDK_REF }}
+          path: deps/hl2sdk-cs2
+
+      - name: Checkout metamod-source
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.MMSOURCE_REPO }}
+          ref: ${{ env.MMSOURCE_REF }}
+          path: deps/metamod-source
+
+      - name: Install protoc 3.21.12
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          mkdir -p "$RUNNER_TEMP/protoc"
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version | grep -q 'libprotoc 3\.21\.12'
+
+      - name: Configure
+        env:
+          HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
+          MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
+          CSGO_PROTO: ${{ github.workspace }}/deps/hl2sdk-cs2/common
+        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build package
+        run: cmake --build build-linux --parallel
+
+      - name: Verify package
+        shell: bash
+        run: |
+          test -f build-linux/package/addons/BotVision/bin/linuxsteamrt64/BotVision.so
+          test -f build-linux/package/addons/metamod/BotVision.vdf
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: BotVision-Linux-${{ needs.guard.outputs.version }}
+          path: build-linux/package/
+          if-no-files-found: error
+
+  # Publishes both platform packages
   release:
     if: inputs.release
-    needs: [guard, windows]
+    needs: [guard, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -115,9 +170,23 @@ jobs:
           name: BotVision-Windows-${{ needs.guard.outputs.version }}
           path: artifacts/BotVision-Windows-${{ needs.guard.outputs.version }}
 
+      - name: Download Linux package
+        uses: actions/download-artifact@v8
+        with:
+          name: BotVision-Linux-${{ needs.guard.outputs.version }}
+          path: artifacts/BotVision-Linux-${{ needs.guard.outputs.version }}
+
       - name: Zip package
         env:
           PACKAGE: BotVision-Windows-${{ needs.guard.outputs.version }}
+        run: |
+          cd "artifacts/$PACKAGE"
+          zip -qr "../$PACKAGE.zip" .
+          test -f "../$PACKAGE.zip"
+
+      - name: Zip Linux package
+        env:
+          PACKAGE: BotVision-Linux-${{ needs.guard.outputs.version }}
         run: |
           cd "artifacts/$PACKAGE"
           zip -qr "../$PACKAGE.zip" .

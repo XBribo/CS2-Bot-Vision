@@ -2,7 +2,11 @@
 
 #include "memory.h"
 
+#if defined(_WIN32)
 #include <Windows.h>
+#else
+#include <cstdio>
+#endif
 
 #include <array>
 #include <atomic>
@@ -11,6 +15,12 @@
 
 namespace cs2bv::memory {
 static std::array<std::atomic<long long>, static_cast<size_t>(FailureDomain::Count)> g_failures{};
+
+#if !defined(_WIN32)
+static thread_local uintptr_t g_cachedRegionStart = 0;
+static thread_local uintptr_t g_cachedRegionEnd = 0;
+static thread_local bool g_cachedRegionReadable = false;
+#endif
 
 // Checks every virtual-memory region covered by an address range
 bool IsReadable(const void* address, size_t size)
@@ -23,6 +33,7 @@ bool IsReadable(const void* address, size_t size)
 
     while (cursor < end)
     {
+#if defined(_WIN32)
         MEMORY_BASIC_INFORMATION memoryInfo{};
         if (VirtualQuery(reinterpret_cast<const void*>(cursor), &memoryInfo, sizeof(memoryInfo)) == 0) return false;
         if (memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) return false;
@@ -38,6 +49,41 @@ bool IsReadable(const void* address, size_t size)
         const uintptr_t regionEnd = regionStart + memoryInfo.RegionSize;
         if (regionEnd <= cursor) return false;
         cursor = regionEnd;
+#else
+        if (cursor >= g_cachedRegionStart && cursor < g_cachedRegionEnd)
+        {
+            if (!g_cachedRegionReadable) return false;
+            cursor = g_cachedRegionEnd;
+            continue;
+        }
+
+        FILE* maps = std::fopen("/proc/self/maps", "r");
+        if (!maps) return false;
+
+        uintptr_t regionStart = 0;
+        uintptr_t regionEnd = 0;
+        bool readable = false;
+        char permissions[5] = {};
+        char line[256] = {};
+        while (std::fgets(line, sizeof(line), maps))
+        {
+            unsigned long long parsedStart = 0;
+            unsigned long long parsedEnd = 0;
+            if (std::sscanf(line, "%llx-%llx %4s", &parsedStart, &parsedEnd, permissions) != 3) continue;
+            if (cursor < static_cast<uintptr_t>(parsedStart) || cursor >= static_cast<uintptr_t>(parsedEnd)) continue;
+
+            regionStart = static_cast<uintptr_t>(parsedStart);
+            regionEnd = static_cast<uintptr_t>(parsedEnd);
+            readable = permissions[0] == 'r';
+            break;
+        }
+        std::fclose(maps);
+        if (!readable || regionEnd <= cursor) return false;
+        g_cachedRegionStart = regionStart;
+        g_cachedRegionEnd = regionEnd;
+        g_cachedRegionReadable = readable;
+        cursor = regionEnd;
+#endif
     }
     return true;
 }

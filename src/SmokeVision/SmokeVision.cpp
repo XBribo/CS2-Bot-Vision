@@ -9,6 +9,8 @@
 #include "platform.h"
 #include "schema_resolver.h"
 
+#include <tier0/dbg.h>
+
 #include <atomic>
 #include <climits>
 #include <cstdarg>
@@ -19,10 +21,10 @@
 #include <vector>
 
 namespace cs2bv::SmokeVision {
-using IsVisibleThroughSmokeFn = bool(__fastcall*)(void* self, const void* from, const void* to);
-using GetSmokeDensityInLineFn = float(__fastcall*)(const float* from, const float* to, float* outClosest);
-using IsVisiblePosFn = __int64(__fastcall*)(__int64 self, __int64 position, char testFov, void* entity);
-using IsVisiblePlayerFn = bool(__fastcall*)(__int64 self, void* player, char testFov, unsigned char* visibleParts);
+using IsVisibleThroughSmokeFn = bool(CS2BV_FASTCALL*)(void* self, const void* from, const void* to);
+using GetSmokeDensityInLineFn = float(CS2BV_FASTCALL*)(const float* from, const float* to, float* outClosest);
+using IsVisiblePosFn = int64_t(CS2BV_FASTCALL*)(int64_t self, int64_t position, char testFov, void* entity);
+using IsVisiblePlayerFn = bool(CS2BV_FASTCALL*)(int64_t self, void* player, char testFov, unsigned char* visibleParts);
 
 static constexpr const char* kSmokeFunctionName = "CBotManager::IsVisibleThroughSmoke";
 static constexpr const char* kAutoListName = "g_AutoList_SmokeProj_Head_Server";
@@ -63,7 +65,7 @@ static thread_local bool g_currentPlayerRevealed = false;
 
 struct BotThresholdCacheEntry
 {
-    __int64 bot = 0;
+    int64_t bot = 0;
     int thresholdMilli = kDefaultThreshold;
     unsigned int usesRemaining = 0;
     unsigned int generation = 0;
@@ -98,9 +100,9 @@ static void ReportError(char* error, size_t maxLength, const char* format, ...)
     std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
 
-    platform::DebugOut("[BotVision] ");
-    platform::DebugOut(buffer);
-    platform::DebugOut("\n");
+    Msg("%s", "[BotVision] ");
+    Msg("%s", buffer);
+    Msg("%s", "\n");
     if (error && maxLength > 0) std::snprintf(error, maxLength, "%s", buffer);
 }
 
@@ -208,7 +210,7 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
     if (signature.empty())
     {
         g_hookedStatus = "sig_empty";
-        platform::DebugOut("[BotVision] AutoList entry/sig missing; hook disabled\n");
+        Msg("%s", "[BotVision] AutoList entry/sig missing; hook disabled\n");
         return;
     }
 
@@ -219,7 +221,7 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
     if (!sig::ParseSigString(signature, pattern, wildcards))
     {
         g_hookedStatus = "sig_parse_failed";
-        platform::DebugOut("[BotVision] AutoList sig parse failed\n");
+        Msg("%s", "[BotVision] AutoList sig parse failed\n");
         return;
     }
 
@@ -227,7 +229,7 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
     if (!site)
     {
         g_hookedStatus = "sig_not_found";
-        platform::DebugOut("[BotVision] AutoList sig not found\n");
+        Msg("%s", "[BotVision] AutoList sig not found\n");
         return;
     }
 
@@ -235,7 +237,7 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
     if (!target)
     {
         g_hookedStatus = "rel32_failed";
-        platform::DebugOut("[BotVision] AutoList rel32 resolve failed\n");
+        Msg("%s", "[BotVision] AutoList rel32 resolve failed\n");
         return;
     }
 
@@ -246,11 +248,11 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
 }
 
 // Resolves a bot engine slot through its pawn controller handle
-static int BotSlotFromBot(__int64 bot)
+static int BotSlotFromBot(int64_t bot)
 {
     if (!bot || g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) return -1;
 
-    __int64 pawn = 0;
+    int64_t pawn = 0;
     if (!memory::Read(reinterpret_cast<const void*>(bot), g_playerInBotOffset, pawn, memory::FailureDomain::Bot)) return -1;
     g_lastPawnPointer.store(static_cast<unsigned long long>(pawn), std::memory_order_relaxed);
     if (!pawn) return -1;
@@ -292,13 +294,13 @@ static bool IsRevealedPlayer(void* player, unsigned long long revealMask)
 }
 
 // Returns the cache index for one bot pointer
-static size_t BotThresholdCacheIndex(__int64 bot)
+static size_t BotThresholdCacheIndex(int64_t bot)
 {
     return static_cast<size_t>(MixPointerValue(static_cast<uintptr_t>(bot))) & (kCacheSize - 1);
 }
 
 // Returns a cached threshold and periodically revalidates the bot
-static int CachedThresholdFromBot(__int64 bot)
+static int CachedThresholdFromBot(int64_t bot)
 {
     if (!bot) return kDefaultThreshold;
 
@@ -336,7 +338,7 @@ static int CachedThresholdFromBot(__int64 bot)
 }
 
 // Stamps a bot-specific threshold around the original visibility call
-static __int64 __fastcall HookedIsVisiblePos(__int64 self, __int64 position, char testFov, void* entity)
+static int64_t CS2BV_FASTCALL HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity)
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
     if (g_smokeMode.load(std::memory_order_relaxed) == 1 || g_botThresholdOverrideCount.load(std::memory_order_relaxed) == 0)
@@ -354,20 +356,20 @@ static __int64 __fastcall HookedIsVisiblePos(__int64 self, __int64 position, cha
 
         const int previous = g_currentBotThresholdMilli;
         g_currentBotThresholdMilli = kDefaultThreshold;
-        const __int64 result = g_originalIsVisiblePos(self, position, testFov, entity);
+        const int64_t result = g_originalIsVisiblePos(self, position, testFov, entity);
         g_currentBotThresholdMilli = previous;
         return result;
     }
 
     const int previous = g_currentBotThresholdMilli;
     g_currentBotThresholdMilli = threshold;
-    const __int64 result = g_originalIsVisiblePos(self, position, testFov, entity);
+    const int64_t result = g_originalIsVisiblePos(self, position, testFov, entity);
     g_currentBotThresholdMilli = previous;
     return result;
 }
 
 // Stamps target reveal state around one complete player visibility scan
-static bool __fastcall HookedIsVisiblePlayer(__int64 self, void* player, char testFov, unsigned char* visibleParts)
+static bool CS2BV_FASTCALL HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts)
 {
     const unsigned long long revealMask = g_revealMask.load(std::memory_order_acquire);
     if (revealMask == 0)
@@ -383,7 +385,7 @@ static bool __fastcall HookedIsVisiblePlayer(__int64 self, void* player, char te
 }
 
 // Replaces binary smoke visibility with density and hole checks
-static bool __fastcall HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to)
+static bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to)
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
     if (g_currentPlayerRevealed) return true;
@@ -462,7 +464,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     {
         char warning[320];
         std::snprintf(warning, sizeof(warning), "[BotVision] %s; mode 0 falls back to vanilla-smoke\n", densityError);
-        platform::DebugOut(warning);
+        Msg("%s", warning);
     }
 
     char visibleError[256] = { 0 };
@@ -486,7 +488,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         const char* reason = g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0 ? "required offset unavailable"
                                                                                       : (visibleTarget ? "funchook error" : visibleError);
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
-        platform::DebugOut(warning);
+        Msg("%s", warning);
     }
 
     char visiblePlayerError[256] = { 0 };
@@ -510,7 +512,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         const char* reason =
             g_controllerHandleOffset < 0 ? "required offset unavailable" : (visiblePlayerTarget ? "funchook error" : visiblePlayerError);
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
-        platform::DebugOut(warning);
+        Msg("%s", warning);
     }
     return true;
 }

@@ -9,6 +9,8 @@
 #include "platform.h"
 #include "schema_resolver.h"
 
+#include <tier0/dbg.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -36,7 +38,7 @@ struct HeInfluence
     float end;
 };
 
-using HeDetonateFn = __int64(__fastcall*)(void* self);
+using HeDetonateFn = int64_t(CS2BV_FASTCALL*)(void* self);
 
 static constexpr const char* kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 static constexpr size_t kMaxHeBlasts = 5;
@@ -80,7 +82,7 @@ static float DensityScale(float distance, float age, float radius, float duratio
 }
 
 // Captures the projectile origin before invoking the original detonation
-static __int64 __fastcall HookedDetonate(void* self)
+static int64_t CS2BV_FASTCALL HookedDetonate(void* self)
 {
     if (self)
     {
@@ -111,7 +113,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     g_absOriginOffset = schema::GetFieldOffset("CGameSceneNode", "m_vecAbsOrigin");
     if (g_bodyComponentOffset < 0 || g_sceneNodeOffset < 0 || g_absOriginOffset < 0)
     {
-        platform::DebugOut("[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
+        Msg("%s", "[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
         g_listenerStatus = "schema=FAIL";
         return false;
     }
@@ -130,7 +132,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     char message[320];
     std::snprintf(message, sizeof(message), "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
                   target ? "funchook error" : error);
-    platform::DebugOut(message);
+    Msg("%s", message);
     g_listenerStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
 }
@@ -160,7 +162,7 @@ void OnDetonate(float x, float y, float z)
     char message[160];
     std::snprintf(message, sizeof(message), "[BotVision] HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d\n", x, y, z, time,
                   GetActiveCount());
-    platform::DebugOut(message);
+    Msg("%s", message);
 }
 
 // Applies active HE records to native density inside each blast chord
