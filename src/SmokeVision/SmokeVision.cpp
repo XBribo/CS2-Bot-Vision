@@ -47,7 +47,7 @@ static std::atomic<long long> g_hitCount{ 0 };
 static std::atomic<long long> g_blockedCount{ 0 };
 static std::string g_hookedStatus = "not_attempted";
 static std::atomic<int> g_smokeMode{ 0 };
-static std::atomic<int> g_densityThresholdMilli{ 190 };
+static std::atomic<int> g_densityThresholdMilli{ 230 };
 
 static int g_controllerHandleOffset = -1;
 static int g_playerInBotOffset = -1;
