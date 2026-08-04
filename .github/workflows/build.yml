@@ -3,8 +3,16 @@ name: Build
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Which platform package to build"
+        type: choice
+        default: all
+        options:
+          - all
+          - windows
+          - linux
       release:
-        description: "Create tag + GitHub release"
+        description: "Create tag + GitHub release (requires target=all)"
         type: boolean
         default: false
 
@@ -39,7 +47,12 @@ jobs:
         if: inputs.release
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          TARGET: ${{ inputs.target }}
         run: |
+          if [ "$TARGET" != "all" ]; then
+            echo "::error::release requires target=all (got '$TARGET')"
+            exit 1
+          fi
           if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
             echo "::error::tag v$VERSION already exists"
             exit 1
@@ -48,6 +61,7 @@ jobs:
 
   # Builds and assembles the complete Windows package
   windows:
+    if: inputs.target == 'all' || inputs.target == 'windows'
     needs: guard
     runs-on: windows-latest
     timeout-minutes: 60
@@ -102,8 +116,11 @@ jobs:
 
   # Builds and assembles the complete Linux package
   linux:
+    if: inputs.target == 'all' || inputs.target == 'linux'
     needs: guard
     runs-on: ubuntu-24.04
+    container:
+      image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -132,27 +149,36 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version | grep -q 'libprotoc 3\.21\.12'
 
-      - name: Configure
+      - name: Configure + build
         env:
           HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
           MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
           CSGO_PROTO: ${{ github.workspace }}/deps/hl2sdk-cs2/common
-        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build package
-        run: cmake --build build-linux --parallel
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
 
       - name: Verify package
-        shell: bash
         run: |
-          test -f build-linux/package/addons/BotVision/bin/linuxsteamrt64/BotVision.so
-          test -f build-linux/package/addons/metamod/BotVision.vdf
+          binary=build/package/addons/BotVision/bin/linuxsteamrt64/BotVision.so
+          test -f "$binary"
+          test -f build/package/addons/metamod/BotVision.vdf
+          max_glibc=$(readelf --version-info "$binary" \
+            | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' \
+            | sort -Vu \
+            | tail -1)
+          test -n "$max_glibc"
+          if [ "$(printf '%s\n' GLIBC_2.31 "$max_glibc" | sort -V | tail -1)" != "GLIBC_2.31" ]; then
+            echo "::error::$binary requires $max_glibc, newer than SteamRT3's GLIBC_2.31"
+            exit 1
+          fi
+          echo "$binary requires at most $max_glibc"
 
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
           name: BotVision-Linux-${{ needs.guard.outputs.version }}
-          path: build-linux/package/
+          path: build/package/
           if-no-files-found: error
 
   # Publishes both platform packages
@@ -164,33 +190,21 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download package
+      - name: Download platform packages
         uses: actions/download-artifact@v8
         with:
-          name: BotVision-Windows-${{ needs.guard.outputs.version }}
-          path: artifacts/BotVision-Windows-${{ needs.guard.outputs.version }}
+          pattern: BotVision-*
+          path: artifacts
 
-      - name: Download Linux package
-        uses: actions/download-artifact@v8
-        with:
-          name: BotVision-Linux-${{ needs.guard.outputs.version }}
-          path: artifacts/BotVision-Linux-${{ needs.guard.outputs.version }}
-
-      - name: Zip package
-        env:
-          PACKAGE: BotVision-Windows-${{ needs.guard.outputs.version }}
+      - name: Zip packages
         run: |
-          cd "artifacts/$PACKAGE"
-          zip -qr "../$PACKAGE.zip" .
-          test -f "../$PACKAGE.zip"
-
-      - name: Zip Linux package
-        env:
-          PACKAGE: BotVision-Linux-${{ needs.guard.outputs.version }}
-        run: |
-          cd "artifacts/$PACKAGE"
-          zip -qr "../$PACKAGE.zip" .
-          test -f "../$PACKAGE.zip"
+          cd artifacts
+          for directory in */; do
+            directory="${directory%/}"
+            (cd "$directory" && zip -qr "../$directory.zip" .)
+            echo "packed $directory.zip"
+          done
+          test "$(find . -maxdepth 1 -name '*.zip' | wc -l)" -eq 2
 
       - name: Create tag + release
         uses: softprops/action-gh-release@v3
