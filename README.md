@@ -15,13 +15,41 @@ BotVision evaluates smoke density, HE blast holes, and bullet holes before decid
 
 ------------------------------------------------------------------------
 
+## Configuration
+
+Startup settings are stored in `addons/BotVision/config.json`:
+
+```json
+{
+    "smoke": {
+        "mode": 0,
+        "density_threshold": 0.23
+    },
+    "he_holes": {
+        "radius": 250.0,
+        "duration": 5.0
+    },
+    "bullet_holes": {
+        "enabled": true,
+        "radius": 20.0,
+        "shotgun_radius": 80.0,
+        "duration": 1.0,
+        "range": 8192.0
+    }
+}
+```
+
+Set `smoke.mode` to `0` for volumetric smoke or `1` for the stock ball-smoke calculation. Radii, durations, the density threshold, and the bullet range must be nonnegative. Missing or invalid settings use the defaults shown above. If `config.json` is missing, BotVision creates it on startup. Reload the plugin or restart the server after changing the configuration.
+
+------------------------------------------------------------------------
+
 ## Console commands
 
 - `bv_status` - print hook, smoke, HE, and bullet-tunnel diagnostics.
 - `bv_smoke_mode <0|1>` - `0` uses volumetric smoke; `1` uses the stock
   ball-smoke calculation.
 - `bv_density_threshold <d>` - set the global smoke-density blocking
-  threshold (default `0.3`).
+  threshold for the current session.
 - `bv_bot_density [<slot> <d>]` - list, query, or set a per-bot density
   threshold; a negative value restores the global threshold.
 - `bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>` - query smoke density along

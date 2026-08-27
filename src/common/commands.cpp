@@ -94,7 +94,7 @@ CON_COMMAND_F(bv_smoke_mode, "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke."
 }
 
 // Reads or changes the global density threshold
-CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold on density (default 0.19).", FCVAR_NONE)
+CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking threshold from config.json.", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
@@ -217,7 +217,7 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
 }
 
 // Enables or disables bullet smoke tunnels
-CON_COMMAND_F(bv_bullet_holes, "bv_bullet_holes <0|1>  enable bullet-through-smoke holes (default 1).", FCVAR_NONE)
+CON_COMMAND_F(bv_bullet_holes, "bv_bullet_holes <0|1>  enable bullet-through-smoke holes from config.json.", FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {

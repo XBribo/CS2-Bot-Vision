@@ -280,6 +280,9 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/configs/addons/BotVision/gamedata.json"
         "${CMAKE_BINARY_DIR}/package/addons/BotVision/gamedata.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/configs/addons/BotVision/config.json"
+        "${CMAKE_BINARY_DIR}/package/addons/BotVision/config.json"
 )
 
 if(MSVC)
