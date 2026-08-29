@@ -11,6 +11,7 @@
 
 #include <array>
 #include <atomic>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 
@@ -73,7 +74,7 @@ bool IsReadable(const void* address, size_t size)
         {
             uint64_t parsedStart = 0;
             uint64_t parsedEnd = 0;
-            if (std::sscanf(line, "%llx-%llx %4s", &parsedStart, &parsedEnd, permissions) != 3) continue;
+            if (std::sscanf(line, "%" SCNx64 "-%" SCNx64 " %4s", &parsedStart, &parsedEnd, permissions) != 3) continue;
             if (cursor < static_cast<uintptr_t>(parsedStart) || cursor >= static_cast<uintptr_t>(parsedEnd)) continue;
 
             regionStart = static_cast<uintptr_t>(parsedStart);
@@ -103,7 +104,8 @@ void RecordFailure(FailureDomain domain)
 const char* Diagnostics()
 {
     static char buffer[192];
-    std::snprintf(buffer, sizeof(buffer), "scene=%lld bot=%lld weapon=%lld bullet=%lld smoke=%lld install=%lld",
+    std::snprintf(buffer, sizeof(buffer),
+                  "scene=%" PRId64 " bot=%" PRId64 " weapon=%" PRId64 " bullet=%" PRId64 " smoke=%" PRId64 " install=%" PRId64,
                   g_failures[static_cast<size_t>(FailureDomain::Scene)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Bot)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Weapon)].load(std::memory_order_relaxed),

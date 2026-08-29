@@ -2,6 +2,48 @@ cmake_minimum_required(VERSION 3.20)
 project(BotVision CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format clang-format.exe)
+file(GLOB_RECURSE BOT_VISION_FORMAT_FILES
+    CONFIGURE_DEPENDS
+    LIST_DIRECTORIES false
+    "${CMAKE_SOURCE_DIR}/src/*.c"
+    "${CMAKE_SOURCE_DIR}/src/*.cc"
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/*.cxx"
+    "${CMAKE_SOURCE_DIR}/src/*.h"
+    "${CMAKE_SOURCE_DIR}/src/*.hh"
+    "${CMAKE_SOURCE_DIR}/src/*.hpp"
+    "${CMAKE_SOURCE_DIR}/src/*.hxx"
+    "${CMAKE_SOURCE_DIR}/src/*.inl"
+)
+
+option(ENABLE_FORMAT_CHECK "Run clang-format check before building BotVision" OFF)
+
+if(CLANG_FORMAT_EXECUTABLE)
+    add_custom_target(format
+        COMMAND "${CLANG_FORMAT_EXECUTABLE}" -i --style=file ${BOT_VISION_FORMAT_FILES}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Formatting BotVision sources"
+        VERBATIM
+    )
+    add_custom_target(format-check
+        COMMAND "${CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror --style=file ${BOT_VISION_FORMAT_FILES}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Checking BotVision source formatting"
+        VERBATIM
+    )
+else()
+    add_custom_target(format
+        COMMAND ${CMAKE_COMMAND} -E echo "clang-format was not found. Set CLANG_FORMAT_EXECUTABLE."
+        COMMAND ${CMAKE_COMMAND} -E false
+    )
+    add_custom_target(format-check
+        COMMAND ${CMAKE_COMMAND} -E echo "clang-format was not found. Set CLANG_FORMAT_EXECUTABLE."
+        COMMAND ${CMAKE_COMMAND} -E false
+    )
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -120,6 +162,10 @@ add_library(
     ${PROTO_SRCS}
     ${SDK_SOURCES}
 )
+
+if(ENABLE_FORMAT_CHECK)
+    add_dependencies(BotVision format-check)
+endif()
 
 target_include_directories(
     BotVision
