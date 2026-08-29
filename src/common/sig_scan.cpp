@@ -51,9 +51,9 @@ ModuleInfo ModuleFromHandle(HMODULE handle)
     MODULEINFO mi{};
     if (!GetModuleInformation(GetCurrentProcess(), handle, &mi, sizeof(mi))) return out;
 
-    out.Base = static_cast<unsigned char*>(mi.lpBaseOfDll);
-    out.Size = static_cast<size_t>(mi.SizeOfImage);
-    out.Segments.push_back({ out.Base, out.Size });
+    out.base = static_cast<unsigned char*>(mi.lpBaseOfDll);
+    out.size = static_cast<size_t>(mi.SizeOfImage);
+    out.segments.push_back({ out.base, out.size });
     return out;
 }
 
@@ -66,10 +66,10 @@ ModuleInfo ModuleSectionFromHandle(HMODULE handle, const char* sectionName)
     ModuleInfo image = ModuleFromHandle(handle);
     if (!image) return out;
 
-    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image.Base);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image.base);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return out;
 
-    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(image.Base + dos->e_lfanew);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(image.base + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE) return out;
 
     const size_t nameLength = std::strlen(sectionName);
@@ -84,11 +84,11 @@ ModuleInfo ModuleSectionFromHandle(HMODULE handle, const char* sectionName)
 
         const size_t sectionSize = static_cast<size_t>(section->Misc.VirtualSize);
         const size_t sectionOffset = static_cast<size_t>(section->VirtualAddress);
-        if (sectionSize == 0 || sectionOffset >= image.Size || sectionSize > image.Size - sectionOffset) return out;
+        if (sectionSize == 0 || sectionOffset >= image.size || sectionSize > image.size - sectionOffset) return out;
 
-        out.Base = image.Base;
-        out.Size = image.Size;
-        out.Segments.push_back({ image.Base + sectionOffset, sectionSize });
+        out.base = image.base;
+        out.size = image.size;
+        out.segments.push_back({ image.base + sectionOffset, sectionSize });
         return out;
     }
     return out;
@@ -108,7 +108,7 @@ void FillModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
 {
     uintptr_t minAddr = UINTPTR_MAX;
     uintptr_t maxAddr = 0;
-    out.Segments.clear();
+    out.segments.clear();
 
     for (int i = 0; i < info->dlpi_phnum; ++i)
     {
@@ -117,7 +117,7 @@ void FillModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
 
         auto* segBase = reinterpret_cast<unsigned char*>(info->dlpi_addr + ph.p_vaddr);
         size_t segSize = static_cast<size_t>(ph.p_memsz);
-        out.Segments.push_back({ segBase, segSize });
+        out.segments.push_back({ segBase, segSize });
 
         uintptr_t start = reinterpret_cast<uintptr_t>(segBase);
         uintptr_t end = start + segSize;
@@ -127,8 +127,8 @@ void FillModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
 
     if (minAddr != UINTPTR_MAX && maxAddr > minAddr)
     {
-        out.Base = reinterpret_cast<unsigned char*>(minAddr);
-        out.Size = static_cast<size_t>(maxAddr - minAddr);
+        out.base = reinterpret_cast<unsigned char*>(minAddr);
+        out.size = static_cast<size_t>(maxAddr - minAddr);
     }
 }
 
@@ -136,16 +136,16 @@ void FillModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
 void FillCodeModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
 {
     FillModuleFromPhdr(info, out);
-    out.Segments.clear();
+    out.segments.clear();
     for (int i = 0; i < info->dlpi_phnum; ++i)
     {
         const ElfW(Phdr) & ph = info->dlpi_phdr[i];
         if (ph.p_type != PT_LOAD || ph.p_memsz == 0 || (ph.p_flags & PF_X) == 0) continue;
 
         auto* segmentBase = reinterpret_cast<unsigned char*>(info->dlpi_addr + ph.p_vaddr);
-        out.Segments.push_back({ segmentBase, static_cast<size_t>(ph.p_memsz) });
+        out.segments.push_back({ segmentBase, static_cast<size_t>(ph.p_memsz) });
     }
-    if (out.Segments.empty()) out = {};
+    if (out.segments.empty()) out = {};
 }
 
 struct FindByNameCtx
@@ -277,51 +277,50 @@ void* FindPatternIn(const ModuleInfo& module, const std::vector<uint8_t>& patter
     if (!module || pattern.empty() || pattern.size() != wild.size()) return nullptr;
 
     const size_t plen = pattern.size();
-    for (const ModuleSegment& segment : module.Segments)
+    for (const ModuleSegment& segment : module.segments)
     {
-        if (!segment.Base || segment.Size < plen) continue;
+        if (!segment.base || segment.size < plen) continue;
 
-        for (size_t i = 0; i + plen <= segment.Size; ++i)
+        for (size_t i = 0; i + plen <= segment.size; ++i)
         {
             bool match = true;
             for (size_t j = 0; j < plen; ++j)
             {
-                if (!wild[j] && segment.Base[i + j] != pattern[j])
+                if (!wild[j] && segment.base[i + j] != pattern[j])
                 {
                     match = false;
                     break;
                 }
             }
-            if (match) return segment.Base + i;
+            if (match) return segment.base + i;
         }
     }
     return nullptr;
 }
 
 // Finds every pattern match in the selected module segments
-std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern,
-                                        const std::vector<bool>& wild)
+std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild)
 {
     std::vector<void*> matches;
     if (!module || pattern.empty() || pattern.size() != wild.size()) return matches;
 
     const size_t patternLength = pattern.size();
-    for (const ModuleSegment& segment : module.Segments)
+    for (const ModuleSegment& segment : module.segments)
     {
-        if (!segment.Base || segment.Size < patternLength) continue;
+        if (!segment.base || segment.size < patternLength) continue;
 
-        for (size_t i = 0; i + patternLength <= segment.Size; ++i)
+        for (size_t i = 0; i + patternLength <= segment.size; ++i)
         {
             bool match = true;
             for (size_t j = 0; j < patternLength; ++j)
             {
-                if (!wild[j] && segment.Base[i + j] != pattern[j])
+                if (!wild[j] && segment.base[i + j] != pattern[j])
                 {
                     match = false;
                     break;
                 }
             }
-            if (match) matches.push_back(segment.Base + i);
+            if (match) matches.push_back(segment.base + i);
         }
     }
     return matches;

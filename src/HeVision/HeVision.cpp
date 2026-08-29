@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace cs2bv::HeVision {
+namespace cs2bv::he_vision {
 struct HeBlast
 {
     float x;
@@ -57,10 +57,7 @@ static std::atomic<int> g_durationMilli{ 5000 };
 static std::string g_listenerStatus = "not_attempted";
 
 // Clamps a scalar to the normalized range
-static float Saturate(float value)
-{
-    return std::clamp(value, 0.0f, 1.0f);
-}
+static float Saturate(float value) { return std::clamp(value, 0.0f, 1.0f); }
 
 // Evaluates the shader smoothstep polynomial
 static float SmoothStep(float value)
@@ -151,7 +148,7 @@ void OnDetonate(float x, float y, float z)
 {
     const float time = game_time::Now();
     const float point[3] = { x, y, z };
-    if (!SmokeVision::HasSmokeNearPoint(point, GetRadius())) return;
+    if (!smoke_vision::HasSmokeNearPoint(point, GetRadius())) return;
 
     {
         std::lock_guard<std::mutex> lock(g_blastMutex);
@@ -208,8 +205,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     g_blasts.resize(writeIndex);
     if (influences.empty()) return density;
 
-    std::sort(influences.begin(), influences.end(), [](const HeInfluence& left, const HeInfluence& right)
-    {
+    std::sort(influences.begin(), influences.end(), [](const HeInfluence& left, const HeInfluence& right) {
         return left.begin < right.begin;
     });
 
@@ -233,7 +229,8 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     {
         for (int slice = 0; slice < kDensitySlices; ++slice)
         {
-            const float sliceBeginAmount = interval.first + (interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices);
+            const float sliceBeginAmount =
+                interval.first + (interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices);
             const float sliceEndAmount =
                 interval.first + (interval.second - interval.first) * (static_cast<float>(slice + 1) / kDensitySlices);
             const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5f;
@@ -296,4 +293,4 @@ void SetListenerStatus(bool managerResolved, bool listenerAdded)
 
 // Returns the current HE diagnostic state
 const char* GetListenerStatus() { return g_listenerStatus.c_str(); }
-} // namespace cs2bv::HeVision
+} // namespace cs2bv::he_vision

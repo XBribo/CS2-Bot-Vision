@@ -38,7 +38,7 @@ class BotVisionPlugin : public ISmmPlugin
     // Resolves the optional CRayTraceInterface and optionally reports failure
     void TryFetchRayTrace(bool reportFailure);
 
-    ISmmAPI* m_ismm = nullptr;
+    ISmmAPI* mIsmm = nullptr;
 
     // Returns plugin author metadata
     const char* GetAuthor() override { return "XBribo(๑•.•๑)"; }
@@ -87,8 +87,8 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 {
     PLUGIN_SAVEVARS();
 
-    cs2bv::commands::g_pEngine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
-    if (!cs2bv::commands::g_pEngine)
+    cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
+    if (!cs2bv::commands::g_engine)
     {
         Msg("%s", "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
     }
@@ -116,21 +116,21 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
         return false;
     }
 
-    if (!cs2bv::BotVision::Install(gamedataPath, serverIface, error, maxlen))
+    if (!cs2bv::bot_vision::Install(gamedataPath, serverIface, error, maxlen))
     {
         return false;
     }
 
-    cs2bv::BotVision::SetEngine(cs2bv::commands::g_pEngine);
+    cs2bv::bot_vision::SetEngine(cs2bv::commands::g_engine);
 
     // Fetch the Ray-Trace interface
-    m_ismm = ismm;
+    mIsmm = ismm;
     TryFetchRayTrace(false);
 
     cs2bv::commands::Register();
     char message[96];
     std::snprintf(message, sizeof(message), "[BotVision] loaded successfully (density threshold %.3f)\n",
-                  cs2bv::BotVision::GetDensityThreshold());
+                  cs2bv::bot_vision::GetDensityThreshold());
     Msg("%s", message);
     return true;
 }
@@ -138,10 +138,10 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 // Resolves and publishes the optional external ray-trace interface
 void BotVisionPlugin::TryFetchRayTrace(bool reportFailure)
 {
-    if (!m_ismm) return;
+    if (!mIsmm) return;
     int returnCode = 0;
-    void* rayTrace = m_ismm->MetaFactory(RAYTRACE_INTERFACE_VERSION, &returnCode, nullptr);
-    cs2bv::BotVision::SetRayTrace(rayTrace, returnCode);
+    void* rayTrace = mIsmm->MetaFactory(RAYTRACE_INTERFACE_VERSION, &returnCode, nullptr);
+    cs2bv::bot_vision::SetRayTrace(rayTrace, returnCode);
 
     if (!rayTrace && reportFailure)
     {
@@ -155,18 +155,18 @@ void BotVisionPlugin::TryFetchRayTrace(bool reportFailure)
 // Retries ray tracing after every Metamod plugin has loaded
 void BotVisionPlugin::AllPluginsLoaded()
 {
-    if (!cs2bv::BotVision::RayTraceReady()) TryFetchRayTrace(true);
+    if (!cs2bv::bot_vision::RayTraceReady()) TryFetchRayTrace(true);
 }
 
 // Removes commands, hooks, and acquired engine state
 bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
     cs2bv::commands::Unregister();
-    cs2bv::BotVision::Remove();
+    cs2bv::bot_vision::Remove();
     ConVar_Unregister();
     g_pCVar = nullptr;
-    cs2bv::commands::g_pEngine = nullptr;
-    cs2bv::BotVision::SetEngine(nullptr);
+    cs2bv::commands::g_engine = nullptr;
+    cs2bv::bot_vision::SetEngine(nullptr);
     Msg("%s", "[BotVision] plugin unloaded\n");
     return true;
 }

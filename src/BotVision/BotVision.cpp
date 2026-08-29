@@ -21,7 +21,7 @@
 #include <iterator>
 #include <limits>
 
-namespace cs2bv::BotVision {
+namespace cs2bv::bot_vision {
 namespace {
 constexpr int kDefaultSmokeMode = 0;
 constexpr float kDefaultDensityThreshold = 0.23f;
@@ -37,16 +37,14 @@ constexpr double kMaximumFixedPointValue = static_cast<double>(std::numeric_limi
 // Builds the packaged startup configuration
 nlohmann::json BuildDefaultConfig()
 {
-    return {
-        { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
-        { "he_holes", { { "radius", kDefaultHeRadius }, { "duration", kDefaultHeDuration } } },
-        { "bullet_holes",
-          { { "enabled", kDefaultBulletHolesEnabled },
-            { "radius", kDefaultBulletRadius },
-            { "shotgun_radius", kDefaultShotgunRadius },
-            { "duration", kDefaultBulletDuration },
-            { "range", kDefaultBulletRange } } }
-    };
+    return { { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
+             { "he_holes", { { "radius", kDefaultHeRadius }, { "duration", kDefaultHeDuration } } },
+             { "bullet_holes",
+               { { "enabled", kDefaultBulletHolesEnabled },
+                 { "radius", kDefaultBulletRadius },
+                 { "shotgun_radius", kDefaultShotgunRadius },
+                 { "duration", kDefaultBulletDuration },
+                 { "range", kDefaultBulletRange } } } };
 }
 
 // Reports one invalid startup setting
@@ -132,7 +130,8 @@ void ApplyStartupConfig(const nlohmann::json& config)
             if (bulletHoles.contains("enabled"))
             {
                 if (bulletHoles["enabled"].is_boolean()) SetBulletHolesEnabled(bulletHoles["enabled"].get<bool>());
-                else WarnInvalidSetting("bullet_holes.enabled");
+                else
+                    WarnInvalidSetting("bullet_holes.enabled");
             }
             ApplyNonNegativeFloat(bulletHoles, "radius", "bullet_holes.radius", SetBulletRadius);
             ApplyNonNegativeFloat(bulletHoles, "shotgun_radius", "bullet_holes.shotgun_radius", SetBulletRadiusShotgun);
@@ -221,19 +220,19 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         Msg("%s", "[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
     }
 
-    if (!SmokeVision::Install(gamedata, serverModule, error, maxLength)) return false;
+    if (!smoke_vision::Install(gamedata, serverModule, error, maxLength)) return false;
 
-    HeVision::Install(gamedata, serverModule);
-    BulletVision::Install(gamedata, serverModule);
+    he_vision::Install(gamedata, serverModule);
+    bullet_vision::Install(gamedata, serverModule);
     return true;
 }
 
 // Removes modules in reverse dependency order
 void Remove()
 {
-    BulletVision::Remove();
-    HeVision::Remove();
-    SmokeVision::Remove();
+    bullet_vision::Remove();
+    he_vision::Remove();
+    smoke_vision::Remove();
 
     char message[160];
     std::snprintf(message, sizeof(message), "[BotVision] removed: hits=%lld blocked=%lld\n", GetHitCount(), GetBlockedCount());
@@ -244,158 +243,158 @@ void Remove()
 void SetEngine(void* engine) { game_time::SetEngine(engine); }
 
 // Forwards the external ray-trace interface to bullet capture
-void SetRayTrace(void* rayTraceInterface, int returnCode) { BulletVision::SetRayTrace(rayTraceInterface, returnCode); }
+void SetRayTrace(void* rayTraceInterface, int returnCode) { bullet_vision::SetRayTrace(rayTraceInterface, returnCode); }
 
 // Checks whether external ray tracing is ready
-bool RayTraceReady() { return BulletVision::RayTraceReady(); }
+bool RayTraceReady() { return bullet_vision::RayTraceReady(); }
 
 // Forwards an HE detonation to HE state
-void OnHeDetonate(float x, float y, float z) { HeVision::OnDetonate(x, y, z); }
+void OnHeDetonate(float x, float y, float z) { he_vision::OnDetonate(x, y, z); }
 
 // Sets the HE hole radius
-void SetHeRadius(float value) { HeVision::SetRadius(value); }
+void SetHeRadius(float value) { he_vision::SetRadius(value); }
 
 // Returns the HE hole radius
-float GetHeRadius() { return HeVision::GetRadius(); }
+float GetHeRadius() { return he_vision::GetRadius(); }
 
 // Sets the HE hole lifetime
-void SetHeDuration(float value) { HeVision::SetDuration(value); }
+void SetHeDuration(float value) { he_vision::SetDuration(value); }
 
 // Returns the HE hole lifetime
-float GetHeDuration() { return HeVision::GetDuration(); }
+float GetHeDuration() { return he_vision::GetDuration(); }
 
 // Returns the active HE hole count
-int GetActiveBlastCount() { return HeVision::GetActiveCount(); }
+int GetActiveBlastCount() { return he_vision::GetActiveCount(); }
 
 // Stores the legacy HE listener diagnostic
-void SetHeListenerStatus(bool managerResolved, bool listenerAdded) { HeVision::SetListenerStatus(managerResolved, listenerAdded); }
+void SetHeListenerStatus(bool managerResolved, bool listenerAdded) { he_vision::SetListenerStatus(managerResolved, listenerAdded); }
 
 // Returns the HE diagnostic state
-const char* GetHeListenerStatus() { return HeVision::GetListenerStatus(); }
+const char* GetHeListenerStatus() { return he_vision::GetListenerStatus(); }
 
 // Forwards a bullet tunnel to bullet state
-void OnBulletHole(const float start[3], const float end[3], float radius) { BulletVision::OnHole(start, end, radius); }
+void OnBulletHole(const float start[3], const float end[3], float radius) { bullet_vision::OnHole(start, end, radius); }
 
 // Sets the normal bullet tunnel radius
-void SetBulletRadius(float value) { BulletVision::SetRadius(value); }
+void SetBulletRadius(float value) { bullet_vision::SetRadius(value); }
 
 // Returns the normal bullet tunnel radius
-float GetBulletRadius() { return BulletVision::GetRadius(); }
+float GetBulletRadius() { return bullet_vision::GetRadius(); }
 
 // Sets the shotgun bullet tunnel radius
-void SetBulletRadiusShotgun(float value) { BulletVision::SetShotgunRadius(value); }
+void SetBulletRadiusShotgun(float value) { bullet_vision::SetShotgunRadius(value); }
 
 // Returns the shotgun bullet tunnel radius
-float GetBulletRadiusShotgun() { return BulletVision::GetShotgunRadius(); }
+float GetBulletRadiusShotgun() { return bullet_vision::GetShotgunRadius(); }
 
 // Returns the active weapon diagnostic
-const char* GetWeaponProbe() { return BulletVision::GetWeaponProbe(); }
+const char* GetWeaponProbe() { return bullet_vision::GetWeaponProbe(); }
 
 // Sets the bullet tunnel lifetime
-void SetBulletDuration(float value) { BulletVision::SetDuration(value); }
+void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
 
 // Returns the bullet tunnel lifetime
-float GetBulletDuration() { return BulletVision::GetDuration(); }
+float GetBulletDuration() { return bullet_vision::GetDuration(); }
 
 // Sets the bullet trace range
-void SetBulletRange(float value) { BulletVision::SetRange(value); }
+void SetBulletRange(float value) { bullet_vision::SetRange(value); }
 
 // Returns the bullet trace range
-float GetBulletRange() { return BulletVision::GetRange(); }
+float GetBulletRange() { return bullet_vision::GetRange(); }
 
 // Stores the bullet tunnel enabled state
-void SetBulletHolesEnabled(bool enabled) { BulletVision::SetHolesEnabled(enabled); }
+void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }
 
 // Returns the bullet tunnel enabled state
-bool GetBulletHolesEnabled() { return BulletVision::GetHolesEnabled(); }
+bool GetBulletHolesEnabled() { return bullet_vision::GetHolesEnabled(); }
 
 // Returns the active bullet tunnel count
-int GetActiveBulletHoleCount() { return BulletVision::GetActiveHoleCount(); }
+int GetActiveBulletHoleCount() { return bullet_vision::GetActiveHoleCount(); }
 
 // Returns bullet capture diagnostics
-const char* GetBulletDiag() { return BulletVision::GetDiagnostics(); }
+const char* GetBulletDiag() { return bullet_vision::GetDiagnostics(); }
 
 // Returns the captured pellet count
-long long GetBulletCount() { return BulletVision::GetBulletCount(); }
+long long GetBulletCount() { return bullet_vision::GetBulletCount(); }
 
 // Returns the last captured pellet diagnostic
-const char* GetLastBulletInfo() { return BulletVision::GetLastBulletInfo(); }
+const char* GetLastBulletInfo() { return bullet_vision::GetLastBulletInfo(); }
 
 // Returns the smoke hook call count
-long long GetHitCount() { return SmokeVision::GetHitCount(); }
+long long GetHitCount() { return smoke_vision::GetHitCount(); }
 
 // Returns the smoke-blocked line count
-long long GetBlockedCount() { return SmokeVision::GetBlockedCount(); }
+long long GetBlockedCount() { return smoke_vision::GetBlockedCount(); }
 
 // Checks whether the smoke auto-list was resolved
-bool IsHookedActive() { return SmokeVision::AutoListReady(); }
+bool IsHookedActive() { return smoke_vision::AutoListReady(); }
 
 // Returns the smoke hook diagnostic
-const char* GetHookedStatus() { return SmokeVision::GetHookedStatus(); }
+const char* GetHookedStatus() { return smoke_vision::GetHookedStatus(); }
 
 // Forwards a diagnostic smoke density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength)
 {
-    return SmokeVision::TestLos(fromX, fromY, fromZ, toX, toY, toZ, buffer, bufferLength);
+    return smoke_vision::TestLos(fromX, fromY, fromZ, toX, toY, toZ, buffer, bufferLength);
 }
 
 // Sets the smoke calculation mode
-void SetSmokeMode(int mode) { SmokeVision::SetMode(mode); }
+void SetSmokeMode(int mode) { smoke_vision::SetMode(mode); }
 
 // Returns the smoke calculation mode
-int GetSmokeMode() { return SmokeVision::GetMode(); }
+int GetSmokeMode() { return smoke_vision::GetMode(); }
 
 // Sets the global density threshold
-void SetDensityThreshold(float value) { SmokeVision::SetDensityThreshold(value); }
+void SetDensityThreshold(float value) { smoke_vision::SetDensityThreshold(value); }
 
 // Returns the global density threshold
-float GetDensityThreshold() { return SmokeVision::GetDensityThreshold(); }
+float GetDensityThreshold() { return smoke_vision::GetDensityThreshold(); }
 
 // Checks whether engine density calculation is ready
-bool IsDensityFnResolved() { return SmokeVision::DensityFunctionReady(); }
+bool IsDensityFnResolved() { return smoke_vision::DensityFunctionReady(); }
 
 // Returns validated memory read diagnostics
 const char* GetSafeReadDiag() { return memory::Diagnostics(); }
 
 // Sets or clears a bot-specific density threshold
-void SetBotDensityThreshold(int slot, float value) { SmokeVision::SetBotDensityThreshold(slot, value); }
+void SetBotDensityThreshold(int slot, float value) { smoke_vision::SetBotDensityThreshold(slot, value); }
 
 // Returns one bot-specific density threshold
-float GetBotDensityThreshold(int slot) { return SmokeVision::GetBotDensityThreshold(slot); }
+float GetBotDensityThreshold(int slot) { return smoke_vision::GetBotDensityThreshold(slot); }
 
 // Returns the supported bot slot count
-int GetMaxBots() { return SmokeVision::GetMaxBots(); }
+int GetMaxBots() { return smoke_vision::GetMaxBots(); }
 
 // Returns the last bot slot observed by the visibility hook
-int GetLastBotSlot() { return SmokeVision::GetLastBotSlot(); }
+int GetLastBotSlot() { return smoke_vision::GetLastBotSlot(); }
 
 // Checks whether the per-bot hook is active
-bool IsVisiblePosHooked() { return SmokeVision::IsVisiblePosHooked(); }
+bool IsVisiblePosHooked() { return smoke_vision::IsVisiblePosHooked(); }
 
 // Returns the per-bot hook call count
-long long GetIsVisiblePosCalls() { return SmokeVision::GetIsVisiblePosCalls(); }
+long long GetIsVisiblePosCalls() { return smoke_vision::GetIsVisiblePosCalls(); }
 
 // Returns the last observed controller handle
-unsigned int GetLastCtrlHandle() { return SmokeVision::GetLastControllerHandle(); }
+unsigned int GetLastCtrlHandle() { return smoke_vision::GetLastControllerHandle(); }
 
 // Returns the last observed pawn pointer
-unsigned long long GetLastPawnPtr() { return SmokeVision::GetLastPawnPointer(); }
+unsigned long long GetLastPawnPtr() { return smoke_vision::GetLastPawnPointer(); }
 
 // Adds one smoke reveal slot
-void AddRevealSlot(int slot) { SmokeVision::AddRevealSlot(slot); }
+void AddRevealSlot(int slot) { smoke_vision::AddRevealSlot(slot); }
 
 // Removes one smoke reveal slot
-void RemoveRevealSlot(int slot) { SmokeVision::RemoveRevealSlot(slot); }
+void RemoveRevealSlot(int slot) { smoke_vision::RemoveRevealSlot(slot); }
 
 // Clears all smoke reveals
-void ClearReveals() { SmokeVision::ClearReveals(); }
+void ClearReveals() { smoke_vision::ClearReveals(); }
 
 // Returns the configured smoke reveal mask
-unsigned long long GetRevealMask() { return SmokeVision::GetRevealMask(); }
+unsigned long long GetRevealMask() { return smoke_vision::GetRevealMask(); }
 
 // Returns one revealed player handle
-unsigned int GetRevealHandle(int slot) { return SmokeVision::GetRevealHandle(slot); }
+unsigned int GetRevealHandle(int slot) { return smoke_vision::GetRevealHandle(slot); }
 
 // Checks whether player visibility is hooked
-bool IsVisiblePlayerHooked() { return SmokeVision::IsVisiblePlayerHooked(); }
-} // namespace cs2bv::BotVision
+bool IsVisiblePlayerHooked() { return smoke_vision::IsVisiblePlayerHooked(); }
+} // namespace cs2bv::bot_vision

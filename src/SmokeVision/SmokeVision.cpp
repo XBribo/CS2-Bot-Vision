@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace cs2bv::SmokeVision {
+namespace cs2bv::smoke_vision {
 using IsVisibleThroughSmokeFn = bool(CS2BV_FASTCALL*)(void* self, const void* from, const void* to);
 using GetSmokeDensityInLineFn = float(CS2BV_FASTCALL*)(const float* from, const float* to, float* outClosest);
 using IsVisiblePosFn = int64_t(CS2BV_FASTCALL*)(int64_t self, int64_t position, char testFov, void* entity);
@@ -87,8 +87,8 @@ static float SampleNativeDensity(const float* from, const float* to)
 static float AdjustClientDensity(const float* from, const float* to, float density)
 {
     float adjusted = density;
-    if (BulletVision::GetHolesEnabled()) adjusted = BulletVision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
-    return HeVision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
+    if (bullet_vision::GetHolesEnabled()) adjusted = bullet_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
+    return he_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
 }
 
 // Reports an install error to both the debug sink and plugin loader
@@ -159,17 +159,17 @@ static void* ResolveWithDetourFallback(
     void* resolved = nullptr;
     size_t matchCount = 0;
     const size_t tailSize = pattern.size() - kRel32JumpSize;
-    for (const sig::ModuleSegment& segment : module.Segments)
+    for (const sig::ModuleSegment& segment : module.segments)
     {
-        if (!segment.Base || segment.Size < pattern.size()) continue;
+        if (!segment.base || segment.size < pattern.size()) continue;
 
-        for (size_t offset = kRel32JumpSize; offset + tailSize <= segment.Size; ++offset)
+        for (size_t offset = kRel32JumpSize; offset + tailSize <= segment.size; ++offset)
         {
             bool matches = true;
             for (size_t index = 0; index < tailSize; ++index)
             {
                 const size_t patternIndex = kRel32JumpSize + index;
-                if (!wildcards[patternIndex] && segment.Base[offset + index] != pattern[patternIndex])
+                if (!wildcards[patternIndex] && segment.base[offset + index] != pattern[patternIndex])
                 {
                     matches = false;
                     break;
@@ -177,7 +177,7 @@ static void* ResolveWithDetourFallback(
             }
             if (!matches) continue;
 
-            unsigned char* candidate = segment.Base + offset - kRel32JumpSize;
+            unsigned char* candidate = segment.base + offset - kRel32JumpSize;
             if (candidate[0] != 0xE9) continue;
 
             int32_t displacement = 0;
@@ -575,7 +575,7 @@ bool HasSmokeNearPoint(const float* point, float radius)
         float from[3] = { point[0], point[1], point[2] };
         float to[3] = { point[0] + direction[0] * radius, point[1] + direction[1] * radius, point[2] + direction[2] * radius };
         float closest[3]{};
-        if (g_getSmokeDensityInLine(from, to, closest) > 0.0f && BulletVision::IsLineUnobstructed(point, closest)) return true;
+        if (g_getSmokeDensityInLine(from, to, closest) > 0.0f && bullet_vision::IsLineUnobstructed(point, closest)) return true;
     }
     return false;
 }
@@ -711,8 +711,8 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
     const bool blocked = adjustedDensity >= threshold;
     written += std::snprintf(buffer + written, bufferLength - written,
                              "density=%.4f adjusted=%.4f threshold=%.4f engineBlock=%d blocked=%d activeHe=%d activeBullets=%d\n", density,
-                             adjustedDensity, threshold, engineBlocked ? 1 : 0, blocked ? 1 : 0, HeVision::GetActiveCount(),
-                             BulletVision::GetActiveHoleCount());
+                             adjustedDensity, threshold, engineBlocked ? 1 : 0, blocked ? 1 : 0, he_vision::GetActiveCount(),
+                             bullet_vision::GetActiveHoleCount());
     return written;
 }
-} // namespace cs2bv::SmokeVision
+} // namespace cs2bv::smoke_vision

@@ -12,18 +12,18 @@
 namespace cs2bv::sig {
 struct ModuleSegment
 {
-    unsigned char* Base = nullptr;
-    size_t Size = 0;
+    unsigned char* base = nullptr;
+    size_t size = 0;
 };
 
 struct ModuleInfo
 {
-    unsigned char* Base = nullptr;
-    size_t Size = 0;
-    std::vector<ModuleSegment> Segments;
+    unsigned char* base = nullptr;
+    size_t size = 0;
+    std::vector<ModuleSegment> segments;
 
     // Reports whether module boundaries were resolved
-    explicit operator bool() const { return Base != nullptr && Size != 0; }
+    explicit operator bool() const { return base != nullptr && size != 0; }
 };
 
 // Read + parse gamedata.json into `out`. Returns false on open/parse error

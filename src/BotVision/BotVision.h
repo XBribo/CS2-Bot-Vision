@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-namespace cs2bv::BotVision {
+namespace cs2bv::bot_vision {
 // Loads gamedata and installs all vision modules
 bool Install(const std::string& gamedataPath, void* serverInterface, char* error = nullptr, size_t maxLength = 0);
 
@@ -167,4 +167,4 @@ unsigned int GetRevealHandle(int slot);
 
 // Reports whether the player visibility hook is active
 bool IsVisiblePlayerHooked();
-} // namespace cs2bv::BotVision
+} // namespace cs2bv::bot_vision

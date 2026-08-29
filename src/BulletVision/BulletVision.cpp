@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace cs2bv::BulletVision {
+namespace cs2bv::bullet_vision {
 struct BulletHole
 {
     float start[3];
@@ -47,25 +47,25 @@ struct WeaponDefinitionCacheEntry
 };
 
 using PelletTraceFn = int64_t(CS2BV_FASTCALL*)(int64_t a1,
-                                           void* a2,
-                                           int64_t a3,
-                                           float a4,
-                                           float a5,
-                                           int a6,
-                                           unsigned char a7,
-                                           int a8,
-                                           int a9,
-                                           float a10,
-                                           int64_t a11,
-                                           int* a12,
-                                           float a13,
-                                           float a14,
-                                           int64_t a15,
-                                           int64_t a16,
-                                           int a17,
-                                           int a18,
-                                           void* a19,
-                                           int64_t a20);
+                                               void* a2,
+                                               int64_t a3,
+                                               float a4,
+                                               float a5,
+                                               int a6,
+                                               unsigned char a7,
+                                               int a8,
+                                               int a9,
+                                               float a10,
+                                               int64_t a11,
+                                               int* a12,
+                                               float a13,
+                                               float a14,
+                                               int64_t a15,
+                                               int64_t a16,
+                                               int a17,
+                                               int a18,
+                                               void* a19,
+                                               int64_t a20);
 using GetSlotFn = void*(CS2BV_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
 
 static constexpr const char* kPelletTraceName = "BulletPelletTrace";
@@ -136,10 +136,7 @@ static float DistanceSquaredToSegment(const float point[3], const float start[3]
 }
 
 // Clamps a scalar to the normalized range
-static float Saturate(float value)
-{
-    return std::clamp(value, 0.0f, 1.0f);
-}
+static float Saturate(float value) { return std::clamp(value, 0.0f, 1.0f); }
 
 // Evaluates the shader smoothstep polynomial
 static float SmoothStep(float value)
@@ -149,8 +146,12 @@ static float SmoothStep(float value)
 }
 
 // Finds the closest parameters between two finite segments
-static float ClosestSegmentParameters(const float firstStart[3], const float firstEnd[3], const float secondStart[3],
-                                      const float secondEnd[3], float& firstAmount, float& secondAmount)
+static float ClosestSegmentParameters(const float firstStart[3],
+                                      const float firstEnd[3],
+                                      const float secondStart[3],
+                                      const float secondEnd[3],
+                                      float& firstAmount,
+                                      float& secondAmount)
 {
     const float first[3] = { firstEnd[0] - firstStart[0], firstEnd[1] - firstStart[1], firstEnd[2] - firstStart[2] };
     const float second[3] = { secondEnd[0] - secondStart[0], secondEnd[1] - secondStart[1], secondEnd[2] - secondStart[2] };
@@ -251,28 +252,28 @@ static int64_t CallOriginalPelletTrace(int64_t a1,
 
 // Captures one pellet path before invoking the engine trace
 static int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
-                                            void* a2,
-                                            int64_t a3,
-                                            float a4,
-                                            float a5,
-                                            int a6,
-                                            unsigned char a7,
-                                            int a8,
-                                            int a9,
-                                            float a10,
-                                            int64_t a11,
-                                            int* a12,
-                                            float a13,
-                                            float a14,
-                                            int64_t a15,
-                                            int64_t a16,
-                                            int a17,
-                                            int a18,
-                                            void* a19,
-                                            int64_t a20)
+                                                void* a2,
+                                                int64_t a3,
+                                                float a4,
+                                                float a5,
+                                                int a6,
+                                                unsigned char a7,
+                                                int a8,
+                                                int a9,
+                                                float a10,
+                                                int64_t a11,
+                                                int* a12,
+                                                float a13,
+                                                float a14,
+                                                int64_t a15,
+                                                int64_t a16,
+                                                int a17,
+                                                int a18,
+                                                void* a19,
+                                                int64_t a20)
 {
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
-    if (!GetHolesEnabled() || !SmokeVision::IsVolumeMode() || !g_rayTrace || !SmokeVision::HasSmokeProjectiles() || !a2 || !a3)
+    if (!GetHolesEnabled() || !smoke_vision::IsVolumeMode() || !g_rayTrace || !smoke_vision::HasSmokeProjectiles() || !a2 || !a3)
     {
         return CallOriginalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
     }
@@ -313,7 +314,7 @@ static int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
     rt::Vector end{ sourceValues[0] + direction[0] * scale, sourceValues[1] + direction[1] * scale,
                     sourceValues[2] + direction[2] * scale };
     float fullEnd[3] = { end.x, end.y, end.z };
-    if (SmokeVision::DensityFunctionReady() && SmokeVision::DensityInLine(sourceValues, fullEnd) <= 0.0f)
+    if (smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, fullEnd) <= 0.0f)
     {
         return CallOriginalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
     }
@@ -325,9 +326,9 @@ static int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
     rt::TraceOptions options;
     rt::TraceResult result;
     const bool traceHit = g_rayTrace->TraceEndShape(&start, &end, shooter, &options, &result);
-    float traceEnd[3] = { traceHit ? result.EndPos.x : end.x, traceHit ? result.EndPos.y : end.y, traceHit ? result.EndPos.z : end.z };
+    float traceEnd[3] = { traceHit ? result.endPos.x : end.x, traceHit ? result.endPos.y : end.y, traceHit ? result.endPos.z : end.z };
     if (traceHit) g_traceHits.fetch_add(1, std::memory_order_relaxed);
-    if (traceHit && SmokeVision::DensityFunctionReady() && SmokeVision::DensityInLine(sourceValues, traceEnd) <= 0.0f)
+    if (traceHit && smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, traceEnd) <= 0.0f)
     {
         return CallOriginalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
     }
@@ -385,7 +386,8 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 
     char getSlotError[256] = { 0 };
     const bool weaponOffsetsReady = g_weaponServicesOffset >= 0 && g_activeWeaponOffset >= 0 && g_itemDefinitionIndexOffset >= 0;
-    void* getSlotTarget = weaponOffsetsReady ? sig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
+    void* getSlotTarget =
+        weaponOffsetsReady ? sig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
     if (getSlotTarget)
     {
         g_getSlot = reinterpret_cast<GetSlotFn>(getSlotTarget);
@@ -428,10 +430,10 @@ bool IsLineUnobstructed(const float* from, const float* to)
     rt::Vector start{ from[0], from[1], from[2] };
     rt::Vector end{ to[0], to[1], to[2] };
     rt::TraceOptions options;
-    options.InteractsWith = 8193;
+    options.interactsWith = 8193;
     rt::TraceResult result;
     const bool traceHit = g_rayTrace->TraceEndShape(&start, &end, nullptr, &options, &result);
-    return !traceHit || result.Fraction >= 0.999f;
+    return !traceHit || result.fraction >= 0.999f;
 }
 
 // Adds or replaces one temporary bullet tunnel
@@ -508,11 +510,11 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         const float hole[3] = { shaderHole.end[0] - shaderHole.start[0], shaderHole.end[1] - shaderHole.start[1],
                                 shaderHole.end[2] - shaderHole.start[2] };
         const float holeLengthSquared = hole[0] * hole[0] + hole[1] * hole[1] + hole[2] * hole[2];
-        const float directionDot = holeLengthSquared > 0.001f
-                                       ? std::clamp((line[0] * hole[0] + line[1] * hole[1] + line[2] * hole[2]) /
-                                                        (lineLength * std::sqrt(holeLengthSquared)),
-                                                    -1.0f, 1.0f)
-                                       : 0.0f;
+        const float directionDot =
+            holeLengthSquared > 0.001f
+                ? std::clamp((line[0] * hole[0] + line[1] * hole[1] + line[2] * hole[2]) / (lineLength * std::sqrt(holeLengthSquared)),
+                             -1.0f, 1.0f)
+                : 0.0f;
 
         float begin = 0.0f;
         float end = 0.0f;
@@ -539,8 +541,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     g_holes.resize(writeIndex);
     if (influences.empty()) return density;
 
-    std::sort(influences.begin(), influences.end(), [](const BulletInfluence& left, const BulletInfluence& right)
-    {
+    std::sort(influences.begin(), influences.end(), [](const BulletInfluence& left, const BulletInfluence& right) {
         return left.begin < right.begin;
     });
 
@@ -564,7 +565,8 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     {
         for (int slice = 0; slice < kDensitySlices; ++slice)
         {
-            const float sliceBeginAmount = interval.first + (interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices);
+            const float sliceBeginAmount =
+                interval.first + (interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices);
             const float sliceEndAmount =
                 interval.first + (interval.second - interval.first) * (static_cast<float>(slice + 1) / kDensitySlices);
             const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5f;
@@ -582,13 +584,12 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
 
                 const float distance = std::sqrt(DistanceSquaredToSegment(midpoint, influence.hole.start, influence.hole.end));
                 const float endpointDelta[3] = { midpoint[0] - influence.hole.end[0], midpoint[1] - influence.hole.end[1],
-                                                  midpoint[2] - influence.hole.end[2] };
+                                                 midpoint[2] - influence.hole.end[2] };
                 const float endpointDistance = std::sqrt(endpointDelta[0] * endpointDelta[0] + endpointDelta[1] * endpointDelta[1] +
                                                          endpointDelta[2] * endpointDelta[2]);
                 const float normalizedDistance = distance / influence.hole.radius;
                 const float endpointFade = std::min(endpointDistance * 0.01f, 1.0f);
-                const float strength =
-                    SmoothStep(1.0f - Saturate(normalizedDistance - endpointFade + 1.0f + influence.age / duration));
+                const float strength = SmoothStep(1.0f - Saturate(normalizedDistance - endpointFade + 1.0f + influence.age / duration));
                 maximumStrength = std::max(maximumStrength, strength);
             }
             if (maximumStrength <= 0.001f) continue;
@@ -663,7 +664,7 @@ const char* GetDiagnostics()
 {
     static char buffer[160];
     std::snprintf(buffer, sizeof(buffer), "rt=%s ret=%d enabled=%d autolist=%s attempts=%lld traceHits=%lld", g_rayTrace ? "OK" : "NULL",
-                  g_rayTraceReturnCode, g_holesEnabled.load(std::memory_order_relaxed), SmokeVision::AutoListReady() ? "set" : "NULL",
+                  g_rayTraceReturnCode, g_holesEnabled.load(std::memory_order_relaxed), smoke_vision::AutoListReady() ? "set" : "NULL",
                   g_traceAttempts.load(std::memory_order_relaxed), g_traceHits.load(std::memory_order_relaxed));
     return buffer;
 }
@@ -677,4 +678,4 @@ const char* GetWeaponProbe()
                   g_lastWeaponShotgun.load(std::memory_order_relaxed), GetShotgunRadius(), GetRadius(), g_getSlot ? "OK" : "NULL");
     return buffer;
 }
-} // namespace cs2bv::BulletVision
+} // namespace cs2bv::bullet_vision

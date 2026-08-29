@@ -6,7 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace cs2bv::BulletVision {
+namespace cs2bv::bullet_vision {
 using DensitySamplerFn = float (*)(const float* from, const float* to);
 
 // Resolves and installs optional bullet capture facilities
@@ -74,4 +74,4 @@ const char* GetDiagnostics();
 
 // Formats the active weapon probe
 const char* GetWeaponProbe();
-} // namespace cs2bv::BulletVision
+} // namespace cs2bv::bullet_vision

@@ -8,7 +8,7 @@
 
 #include <cstddef>
 
-namespace cs2bv::SmokeVision {
+namespace cs2bv::smoke_vision {
 // Installs the required smoke hook and optional per-bot hook
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule, char* error, size_t maxLength);
 
@@ -98,4 +98,4 @@ bool IsVisiblePlayerHooked();
 
 // Formats a smoke density test for one line
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength);
-} // namespace cs2bv::SmokeVision
+} // namespace cs2bv::smoke_vision

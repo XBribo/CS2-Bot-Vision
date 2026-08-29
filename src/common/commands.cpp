@@ -12,7 +12,7 @@
 
 namespace cs2bv::commands {
 
-IVEngineServer2* g_pEngine = nullptr;
+IVEngineServer2* g_engine = nullptr;
 
 // Prints formatted text to the invoking console
 void PrintToCaller(const CCommandContext& context, const char* fmt, ...)
@@ -24,9 +24,9 @@ void PrintToCaller(const CCommandContext& context, const char* fmt, ...)
     va_end(args);
 
     const CPlayerSlot slot = context.GetPlayerSlot();
-    if (g_pEngine && slot.IsValid())
+    if (g_engine && slot.IsValid())
     {
-        g_pEngine->ClientPrintf(slot, buf);
+        g_engine->ClientPrintf(slot, buf);
     }
     else
     {
@@ -46,14 +46,14 @@ void Unregister() { /* process-lifetime; no-op */ }
 CON_COMMAND_F(bv_status, "Print BotVision plugin status.", FCVAR_NONE)
 {
     cs2bv::commands::PrintToCaller(context, "[BotVision] hits=%lld blocked=%lld hooked=%s heHoles=%d heEvent=%s\n",
-                                   static_cast<long long>(cs2bv::BotVision::GetHitCount()),
-                                   static_cast<long long>(cs2bv::BotVision::GetBlockedCount()), cs2bv::BotVision::GetHookedStatus(),
-                                   cs2bv::BotVision::GetActiveBlastCount(), cs2bv::BotVision::GetHeListenerStatus());
+                                   static_cast<long long>(cs2bv::bot_vision::GetHitCount()),
+                                   static_cast<long long>(cs2bv::bot_vision::GetBlockedCount()), cs2bv::bot_vision::GetHookedStatus(),
+                                   cs2bv::bot_vision::GetActiveBlastCount(), cs2bv::bot_vision::GetHeListenerStatus());
     cs2bv::commands::PrintToCaller(context, "[BotVision] bullets=%lld holes=%d last: %s\n",
-                                   static_cast<long long>(cs2bv::BotVision::GetBulletCount()), cs2bv::BotVision::GetActiveBulletHoleCount(),
-                                   cs2bv::BotVision::GetLastBulletInfo());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] bulletDiag: %s\n", cs2bv::BotVision::GetBulletDiag());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] safeReadFailures: %s\n", cs2bv::BotVision::GetSafeReadDiag());
+                                   static_cast<long long>(cs2bv::bot_vision::GetBulletCount()),
+                                   cs2bv::bot_vision::GetActiveBulletHoleCount(), cs2bv::bot_vision::GetLastBulletInfo());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] bulletDiag: %s\n", cs2bv::bot_vision::GetBulletDiag());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] safeReadFailures: %s\n", cs2bv::bot_vision::GetSafeReadDiag());
 }
 
 // Tests smoke density along an explicit line
@@ -71,7 +71,7 @@ CON_COMMAND_F(bv_test_los, "bv_test_los x1 y1 z1 x2 y2 z2 - query smoke density 
     float ty = (float)std::atof(args.Arg(5));
     float tz = (float)std::atof(args.Arg(6));
     char buf[1024];
-    cs2bv::BotVision::TestLos(fx, fy, fz, tx, ty, tz, buf, sizeof(buf));
+    cs2bv::bot_vision::TestLos(fx, fy, fz, tx, ty, tz, buf, sizeof(buf));
     cs2bv::commands::PrintToCaller(context, "%s", buf);
 }
 
@@ -83,13 +83,13 @@ CON_COMMAND_F(bv_smoke_mode, "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke."
         cs2bv::commands::PrintToCaller(context,
                                        "current mode=%d  densThr=%.3f  densityFn=%s\n"
                                        "  (0=volume-smoke 1=ball-smoke)\n",
-                                       cs2bv::BotVision::GetSmokeMode(), cs2bv::BotVision::GetDensityThreshold(),
-                                       cs2bv::BotVision::IsDensityFnResolved() ? "resolved" : "MISSING(mode0->ball-smoke)");
+                                       cs2bv::bot_vision::GetSmokeMode(), cs2bv::bot_vision::GetDensityThreshold(),
+                                       cs2bv::bot_vision::IsDensityFnResolved() ? "resolved" : "MISSING(mode0->ball-smoke)");
         return;
     }
     int m = std::atoi(args.Arg(1));
     if (m < 0 || m > 1) m = 0;
-    cs2bv::BotVision::SetSmokeMode(m);
+    cs2bv::bot_vision::SetSmokeMode(m);
     cs2bv::commands::PrintToCaller(context, "smoke mode set to %d\n", m);
 }
 
@@ -98,13 +98,13 @@ CON_COMMAND_F(bv_density_threshold, "bv_density_threshold <d>  mode-0 blocking t
 {
     if (args.ArgC() < 2)
     {
-        cs2bv::commands::PrintToCaller(context, "current density threshold = %.3f\n", cs2bv::BotVision::GetDensityThreshold());
+        cs2bv::commands::PrintToCaller(context, "current density threshold = %.3f\n", cs2bv::bot_vision::GetDensityThreshold());
         return;
     }
     float v = (float)std::atof(args.Arg(1));
     if (v < 0.0f) v = 0.0f;
-    cs2bv::BotVision::SetDensityThreshold(v);
-    cs2bv::commands::PrintToCaller(context, "density threshold set to %.3f\n", cs2bv::BotVision::GetDensityThreshold());
+    cs2bv::bot_vision::SetDensityThreshold(v);
+    cs2bv::commands::PrintToCaller(context, "density threshold set to %.3f\n", cs2bv::bot_vision::GetDensityThreshold());
 }
 
 // Lists, reads, or changes per-bot density thresholds
@@ -116,22 +116,22 @@ CON_COMMAND_F(bv_bot_density,
     /* list every slot*/
     if (args.ArgC() < 2)
     {
-        if (!cs2bv::BotVision::IsVisiblePosHooked())
+        if (!cs2bv::bot_vision::IsVisiblePosHooked())
         {
             cs2bv::commands::PrintToCaller(context, "per-bot density unavailable (IsVisiblePos hook failed)\n");
             return;
         }
         cs2bv::commands::PrintToCaller(context, "per-bot density (global default=%.3f, lastBotSlot=%d):\n",
-                                       cs2bv::BotVision::GetDensityThreshold(), cs2bv::BotVision::GetLastBotSlot());
+                                       cs2bv::bot_vision::GetDensityThreshold(), cs2bv::bot_vision::GetLastBotSlot());
         cs2bv::commands::PrintToCaller(context, "  probe: isVisiblePosCalls=%lld lastCtrlHandle=0x%X pawn=0x%llX\n",
-                                       static_cast<long long>(cs2bv::BotVision::GetIsVisiblePosCalls()),
-                                       cs2bv::BotVision::GetLastCtrlHandle(),
-                                       static_cast<unsigned long long>(cs2bv::BotVision::GetLastPawnPtr()));
-        int n = cs2bv::BotVision::GetMaxBots();
+                                       static_cast<long long>(cs2bv::bot_vision::GetIsVisiblePosCalls()),
+                                       cs2bv::bot_vision::GetLastCtrlHandle(),
+                                       static_cast<unsigned long long>(cs2bv::bot_vision::GetLastPawnPtr()));
+        int n = cs2bv::bot_vision::GetMaxBots();
         int shown = 0;
         for (int s = 0; s < n; ++s)
         {
-            float v = cs2bv::BotVision::GetBotDensityThreshold(s);
+            float v = cs2bv::bot_vision::GetBotDensityThreshold(s);
             if (v >= 0.0f)
             {
                 cs2bv::commands::PrintToCaller(context, "  slot %d = %.3f\n", s, v);
@@ -145,19 +145,19 @@ CON_COMMAND_F(bv_bot_density,
     int slot = std::atoi(args.Arg(1));
     if (args.ArgC() < 3)
     {
-        float v = cs2bv::BotVision::GetBotDensityThreshold(slot);
+        float v = cs2bv::bot_vision::GetBotDensityThreshold(slot);
         if (v < 0.0f)
-            cs2bv::commands::PrintToCaller(context, "slot %d uses default (%.3f)\n", slot, cs2bv::BotVision::GetDensityThreshold());
+            cs2bv::commands::PrintToCaller(context, "slot %d uses default (%.3f)\n", slot, cs2bv::bot_vision::GetDensityThreshold());
         else
             cs2bv::commands::PrintToCaller(context, "slot %d density = %.3f\n", slot, v);
         return;
     }
     /* set (or clear if negative) */
     float v = (float)std::atof(args.Arg(2));
-    cs2bv::BotVision::SetBotDensityThreshold(slot, v);
+    cs2bv::bot_vision::SetBotDensityThreshold(slot, v);
     if (v < 0.0f) cs2bv::commands::PrintToCaller(context, "slot %d density cleared (uses default)\n", slot);
     else
-        cs2bv::commands::PrintToCaller(context, "slot %d density set to %.3f\n", slot, cs2bv::BotVision::GetBotDensityThreshold(slot));
+        cs2bv::commands::PrintToCaller(context, "slot %d density set to %.3f\n", slot, cs2bv::bot_vision::GetBotDensityThreshold(slot));
 }
 
 // Manages players whose smoke visibility checks are bypassed
@@ -166,14 +166,14 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
     const char* action = args.ArgC() >= 2 ? args.Arg(1) : "list";
     if (std::strcmp(action, "list") == 0)
     {
-        const unsigned long long mask = cs2bv::BotVision::GetRevealMask();
+        const unsigned long long mask = cs2bv::bot_vision::GetRevealMask();
         cs2bv::commands::PrintToCaller(context, "smoke reveals (hook=%s):\n",
-                                       cs2bv::BotVision::IsVisiblePlayerHooked() ? "active" : "unavailable");
+                                       cs2bv::bot_vision::IsVisiblePlayerHooked() ? "active" : "unavailable");
         int shown = 0;
-        for (int slot = 0; slot < cs2bv::BotVision::GetMaxBots(); ++slot)
+        for (int slot = 0; slot < cs2bv::bot_vision::GetMaxBots(); ++slot)
         {
             if ((mask & (1ULL << slot)) == 0) continue;
-            cs2bv::commands::PrintToCaller(context, "  slot %d handle=0x%X\n", slot, cs2bv::BotVision::GetRevealHandle(slot));
+            cs2bv::commands::PrintToCaller(context, "  slot %d handle=0x%X\n", slot, cs2bv::bot_vision::GetRevealHandle(slot));
             ++shown;
         }
         if (shown == 0) cs2bv::commands::PrintToCaller(context, "  (none)\n");
@@ -182,7 +182,7 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
 
     if (std::strcmp(action, "clear") == 0)
     {
-        cs2bv::BotVision::ClearReveals();
+        cs2bv::bot_vision::ClearReveals();
         cs2bv::commands::PrintToCaller(context, "all smoke reveals cleared\n");
         return;
     }
@@ -197,21 +197,21 @@ CON_COMMAND_F(bv_reveal, "bv_reveal <add|remove|list|clear> [slot].", FCVAR_NONE
     }
 
     const int slot = std::atoi(args.Arg(2));
-    if (slot < 0 || slot >= cs2bv::BotVision::GetMaxBots())
+    if (slot < 0 || slot >= cs2bv::bot_vision::GetMaxBots())
     {
-        cs2bv::commands::PrintToCaller(context, "slot must be 0-%d\n", cs2bv::BotVision::GetMaxBots() - 1);
+        cs2bv::commands::PrintToCaller(context, "slot must be 0-%d\n", cs2bv::bot_vision::GetMaxBots() - 1);
         return;
     }
 
     if (add)
     {
-        cs2bv::BotVision::AddRevealSlot(slot);
+        cs2bv::bot_vision::AddRevealSlot(slot);
         cs2bv::commands::PrintToCaller(context, "smoke reveal added: slot %d (%s)\n", slot,
-                                       cs2bv::BotVision::IsVisiblePlayerHooked() ? "active" : "IsVisiblePlayer hook unavailable");
+                                       cs2bv::bot_vision::IsVisiblePlayerHooked() ? "active" : "IsVisiblePlayer hook unavailable");
     }
     else
     {
-        cs2bv::BotVision::RemoveRevealSlot(slot);
+        cs2bv::bot_vision::RemoveRevealSlot(slot);
         cs2bv::commands::PrintToCaller(context, "smoke reveal removed: slot %d\n", slot);
     }
 }
@@ -221,10 +221,10 @@ CON_COMMAND_F(bv_bullet_holes, "bv_bullet_holes <0|1>  enable bullet-through-smo
 {
     if (args.ArgC() < 2)
     {
-        cs2bv::commands::PrintToCaller(context, "bullet holes = %d\n", cs2bv::BotVision::GetBulletHolesEnabled() ? 1 : 0);
+        cs2bv::commands::PrintToCaller(context, "bullet holes = %d\n", cs2bv::bot_vision::GetBulletHolesEnabled() ? 1 : 0);
         return;
     }
     bool e = std::atoi(args.Arg(1)) != 0;
-    cs2bv::BotVision::SetBulletHolesEnabled(e);
+    cs2bv::bot_vision::SetBulletHolesEnabled(e);
     cs2bv::commands::PrintToCaller(context, "bullet holes set to %d\n", e ? 1 : 0);
 }

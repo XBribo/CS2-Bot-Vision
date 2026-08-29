@@ -15,18 +15,18 @@ struct Vector
 
 struct TraceOptions
 {
-    uint64_t InteractsWith = 0x2c3011; // MASK_SHOT_PHYSICS
-    uint64_t InteractsExclude = 0;
-    int DrawBeam = 0;
+    uint64_t interactsWith = 0x2c3011; // MASK_SHOT_PHYSICS
+    uint64_t interactsExclude = 0;
+    int drawBeam = 0;
 };
 
 struct TraceResult
 {
-    Vector EndPos{};
-    void* HitEntity = nullptr;
-    float Fraction = 1.0f;
-    int AllSolid = 0;
-    Vector Normal{};
+    Vector endPos{};
+    void* hitEntity = nullptr;
+    float fraction = 1.0f;
+    int allSolid = 0;
+    Vector normal{};
 };
 
 class CRayTraceInterface
@@ -36,11 +36,11 @@ class CRayTraceInterface
     virtual ~CRayTraceInterface() = default;
 
     // Traces from a point using an angle representation
-    virtual bool TraceShape(
-        const Vector* pVecStart, const void* pAngAngles, void* pIgnoreEntity, TraceOptions* pTraceOptions, TraceResult* pTraceResult) = 0;
+    virtual bool
+    TraceShape(const Vector* start, const void* angles, void* ignoreEntity, TraceOptions* traceOptions, TraceResult* traceResult) = 0;
 
     // Traces between two explicit positions
-    virtual bool TraceEndShape(
-        const Vector* pVecStart, const Vector* pVecEnd, void* pIgnoreEntity, TraceOptions* pTraceOptions, TraceResult* pTraceResult) = 0;
+    virtual bool
+    TraceEndShape(const Vector* start, const Vector* end, void* ignoreEntity, TraceOptions* traceOptions, TraceResult* traceResult) = 0;
 };
 } // namespace cs2bv::rt

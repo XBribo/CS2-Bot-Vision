@@ -5,7 +5,7 @@ class CCommandContext;
 
 namespace cs2bv::commands {
 
-extern IVEngineServer2* g_pEngine;
+extern IVEngineServer2* g_engine;
 
 // Registers plugin console commands
 void Register();

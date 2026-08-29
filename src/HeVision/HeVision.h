@@ -6,7 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace cs2bv::HeVision {
+namespace cs2bv::he_vision {
 using DensitySamplerFn = float (*)(const float* from, const float* to);
 
 // Resolves and installs the optional HE detonation hook
@@ -41,4 +41,4 @@ void SetListenerStatus(bool managerResolved, bool listenerAdded);
 
 // Returns the HE hook or listener diagnostic state
 const char* GetListenerStatus();
-} // namespace cs2bv::HeVision
+} // namespace cs2bv::he_vision
