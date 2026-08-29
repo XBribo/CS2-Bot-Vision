@@ -33,13 +33,12 @@ Startup settings are stored in `addons/BotVision/config.json`:
         "enabled": true,
         "radius": 20.0,
         "shotgun_radius": 80.0,
-        "duration": 1.0,
-        "range": 8192.0
+        "duration": 1.0
     }
 }
 ```
 
-Set `smoke.mode` to `0` for volumetric smoke or `1` for the stock ball-smoke calculation. Radii, durations, the density threshold, and the bullet range must be nonnegative. Missing or invalid settings use the defaults shown above. If `config.json` is missing, BotVision creates it on startup. Reload the plugin or restart the server after changing the configuration.
+Set `smoke.mode` to `0` for volumetric smoke or `1` for the stock ball-smoke calculation. Radii, durations, and the density threshold must be nonnegative. Missing or invalid settings use the defaults shown above. If `config.json` is missing, BotVision creates it on startup. Reload the plugin or restart the server after changing the configuration.
 
 ------------------------------------------------------------------------
 
@@ -76,8 +75,6 @@ bv_reveal clear
 ------------------------------------------------------------------------
 
 ## Install
-
-Requirement: [RayTrace](https://github.com/FUNPLAY-pro-CS2/Ray-Trace)
 
 1. Download the latest Windows release from
    [GitHub Releases](https://github.com/XBribo/CS2-Bot-Vision/releases/latest):

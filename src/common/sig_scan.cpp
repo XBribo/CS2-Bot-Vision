@@ -41,6 +41,33 @@ void SetError(char* out, size_t outLen, const char* fmt, const char* a, const ch
         std::snprintf(out, outLen, fmt, a);
 }
 
+// Checks whether a complete range belongs to one selected module segment
+bool ContainsRange(const ModuleInfo& module, const void* address, size_t length)
+{
+    if (!address || length == 0) return false;
+    const uintptr_t begin = reinterpret_cast<uintptr_t>(address);
+    const uintptr_t end = begin + length;
+    if (end < begin) return false;
+
+    for (const ModuleSegment& segment : module.segments)
+    {
+        const uintptr_t segmentBegin = reinterpret_cast<uintptr_t>(segment.base);
+        const uintptr_t segmentEnd = segmentBegin + segment.size;
+        if (segmentEnd >= segmentBegin && begin >= segmentBegin && end <= segmentEnd) return true;
+    }
+    return false;
+}
+
+// Finds every exact byte sequence in selected module segments
+std::vector<void*> FindExactMatches(const ModuleInfo& module, const void* bytes, size_t length)
+{
+    if (!bytes || length == 0) return {};
+    const auto* first = static_cast<const uint8_t*>(bytes);
+    std::vector<uint8_t> pattern(first, first + length);
+    std::vector<bool> wild(length, false);
+    return FindPatternMatchesIn(module, pattern, wild);
+}
+
 #if defined(_WIN32)
 // Resolves module boundaries from a Windows module handle
 ModuleInfo ModuleFromHandle(HMODULE handle)
@@ -180,6 +207,12 @@ struct FindByAddressCtx
     ModuleInfo Result;
 };
 
+struct FindExecutableAddressCtx
+{
+    uintptr_t Address = 0;
+    bool Found = false;
+};
+
 // Selects the ELF module containing an address
 int FindByAddressCallback(dl_phdr_info* info, size_t, void* data)
 {
@@ -195,6 +228,26 @@ int FindByAddressCallback(dl_phdr_info* info, size_t, void* data)
         {
             FillModuleFromPhdr(info, ctx->Result);
             return ctx->Result ? 1 : 0;
+        }
+    }
+    return 0;
+}
+
+// Checks executable ELF load segments for one address
+int FindExecutableAddressCallback(dl_phdr_info* info, size_t, void* data)
+{
+    auto* ctx = static_cast<FindExecutableAddressCtx*>(data);
+    for (int i = 0; i < info->dlpi_phnum; ++i)
+    {
+        const ElfW(Phdr) & ph = info->dlpi_phdr[i];
+        if (ph.p_type != PT_LOAD || ph.p_memsz == 0 || (ph.p_flags & PF_X) == 0) continue;
+
+        const uintptr_t start = info->dlpi_addr + ph.p_vaddr;
+        const uintptr_t end = start + ph.p_memsz;
+        if (ctx->Address >= start && ctx->Address < end)
+        {
+            ctx->Found = true;
+            return 1;
         }
     }
     return 0;
@@ -369,6 +422,111 @@ ModuleInfo ModuleFromInterfacePtr(void* interfacePtr)
     ctx.Address = reinterpret_cast<uintptr_t>(vtable);
     dl_iterate_phdr(FindByAddressCallback, &ctx);
     return ctx.Result;
+#endif
+}
+
+// Resolves a polymorphic class vtable from platform RTTI records
+void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char* errorOut, size_t errorOutLen)
+{
+    if (!module || !className || !className[0])
+    {
+        SetError(errorOut, errorOutLen, "%s", "invalid RTTI vtable request");
+        return nullptr;
+    }
+
+#if defined(_WIN32)
+    const auto moduleHandle = reinterpret_cast<HMODULE>(module.base);
+    const ModuleInfo data = ModuleSectionFromHandle(moduleHandle, ".data");
+    const ModuleInfo rdata = ModuleSectionFromHandle(moduleHandle, ".rdata");
+    if (!data || !rdata)
+    {
+        SetError(errorOut, errorOutLen, "PE RTTI sections unavailable for '%s'", className);
+        return nullptr;
+    }
+
+    std::string decoratedName = ".?AV" + std::string(className) + "@@";
+    decoratedName.push_back('\0');
+    const auto nameMatches = FindExactMatches(data, decoratedName.data(), decoratedName.size());
+    for (void* nameMatch : nameMatches)
+    {
+        auto* nameAddress = static_cast<unsigned char*>(nameMatch);
+        if (!ContainsRange(data, nameAddress - 0x10, 0x10 + decoratedName.size())) continue;
+
+        const auto* typeDescriptor = nameAddress - 0x10;
+        const uintptr_t descriptorOffset = static_cast<uintptr_t>(typeDescriptor - module.base);
+        if (descriptorOffset > UINT32_MAX) continue;
+        const uint32_t descriptorRva = static_cast<uint32_t>(descriptorOffset);
+        for (void* descriptorMatch : FindExactMatches(rdata, &descriptorRva, sizeof(descriptorRva)))
+        {
+            auto* descriptorReference = static_cast<unsigned char*>(descriptorMatch);
+            if (!ContainsRange(rdata, descriptorReference - 0x0C, 0x18)) continue;
+
+            auto* locator = descriptorReference - 0x0C;
+            int32_t signature = 0;
+            int32_t vtableOffset = 0;
+            std::memcpy(&signature, locator, sizeof(signature));
+            std::memcpy(&vtableOffset, locator + sizeof(signature), sizeof(vtableOffset));
+            if (signature != 1 || vtableOffset != 0) continue;
+
+            const uintptr_t locatorAddress = reinterpret_cast<uintptr_t>(locator);
+            for (void* locatorMatch : FindExactMatches(rdata, &locatorAddress, sizeof(locatorAddress)))
+            {
+                auto* vtable = reinterpret_cast<void**>(static_cast<unsigned char*>(locatorMatch) + sizeof(void*));
+                if (!ContainsRange(rdata, vtable, sizeof(void*)) || !ContainsRange(module, vtable[0], 1) ||
+                    !IsExecutableAddress(vtable[0]))
+                {
+                    continue;
+                }
+                return vtable;
+            }
+        }
+    }
+#else
+    std::string decoratedName = std::to_string(std::strlen(className)) + className;
+    decoratedName.push_back('\0');
+    for (void* nameMatch : FindExactMatches(module, decoratedName.data(), decoratedName.size()))
+    {
+        const uintptr_t nameAddress = reinterpret_cast<uintptr_t>(nameMatch);
+        for (void* nameReferenceMatch : FindExactMatches(module, &nameAddress, sizeof(nameAddress)))
+        {
+            auto* nameReference = static_cast<unsigned char*>(nameReferenceMatch);
+            if (!ContainsRange(module, nameReference - sizeof(void*), sizeof(void*) * 2)) continue;
+
+            const uintptr_t typeInfoAddress = reinterpret_cast<uintptr_t>(nameReference - sizeof(void*));
+            for (void* typeInfoMatch : FindExactMatches(module, &typeInfoAddress, sizeof(typeInfoAddress)))
+            {
+                auto* typeInfoReference = static_cast<unsigned char*>(typeInfoMatch);
+                if (!ContainsRange(module, typeInfoReference - sizeof(ptrdiff_t), sizeof(void*) * 3)) continue;
+
+                ptrdiff_t offsetToTop = -1;
+                std::memcpy(&offsetToTop, typeInfoReference - sizeof(offsetToTop), sizeof(offsetToTop));
+                auto* vtable = reinterpret_cast<void**>(typeInfoReference + sizeof(void*));
+                if (offsetToTop != 0 || !ContainsRange(module, vtable[0], 1) || !IsExecutableAddress(vtable[0])) continue;
+                return vtable;
+            }
+        }
+    }
+#endif
+
+    SetError(errorOut, errorOutLen, "RTTI vtable unavailable for '%s'", className);
+    return nullptr;
+}
+
+// Checks whether an address belongs to executable image memory
+bool IsExecutableAddress(const void* address)
+{
+    if (!address) return false;
+#if defined(_WIN32)
+    MEMORY_BASIC_INFORMATION memory{};
+    if (!VirtualQuery(address, &memory, sizeof(memory)) || memory.State != MEM_COMMIT || (memory.Protect & PAGE_GUARD) != 0) return false;
+    const DWORD protection = memory.Protect & 0xFF;
+    return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ || protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+#else
+    FindExecutableAddressCtx ctx{};
+    ctx.Address = reinterpret_cast<uintptr_t>(address);
+    dl_iterate_phdr(FindExecutableAddressCallback, &ctx);
+    return ctx.Found;
 #endif
 }
 

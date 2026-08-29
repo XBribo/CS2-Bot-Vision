@@ -11,7 +11,6 @@
         "enabled": true,
         "radius": 20.0,
         "shotgun_radius": 80.0,
-        "duration": 1.0,
-        "range": 8192.0
+        "duration": 1.0
     }
 }

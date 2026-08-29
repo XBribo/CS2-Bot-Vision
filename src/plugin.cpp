@@ -15,7 +15,6 @@
 #include "BotVision/BotVision.h"
 #include "common/commands.h"
 #include "common/platform.h"
-#include "common/raytrace_iface.h"
 
 class BotVisionPlugin : public ISmmPlugin
 {
@@ -31,14 +30,6 @@ class BotVisionPlugin : public ISmmPlugin
 
     // Accepts plugin unpause requests
     bool Unpause(char* /*error*/, size_t /*maxlen*/) override { return true; }
-
-    // Retries optional interfaces after all plugins are loaded
-    void AllPluginsLoaded() override;
-
-    // Resolves the optional CRayTraceInterface and optionally reports failure
-    void TryFetchRayTrace(bool reportFailure);
-
-    ISmmAPI* mIsmm = nullptr;
 
     // Returns plugin author metadata
     const char* GetAuthor() override { return "XBribo(๑•.•๑)"; }
@@ -56,7 +47,7 @@ class BotVisionPlugin : public ISmmPlugin
     const char* GetLicense() override { return "AGPL3.0"; }
 
     // Returns plugin version metadata
-    const char* GetVersion() override { return "0.2.4"; }
+    const char* GetVersion() override { return "0.2.5"; }
 
     // Returns plugin build date metadata
     const char* GetDate() override { return __DATE__; }
@@ -123,39 +114,12 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
     cs2bv::bot_vision::SetEngine(cs2bv::commands::g_engine);
 
-    // Fetch the Ray-Trace interface
-    mIsmm = ismm;
-    TryFetchRayTrace(false);
-
     cs2bv::commands::Register();
     char message[96];
     std::snprintf(message, sizeof(message), "[BotVision] loaded successfully (density threshold %.3f)\n",
                   cs2bv::bot_vision::GetDensityThreshold());
     Msg("%s", message);
     return true;
-}
-
-// Resolves and publishes the optional external ray-trace interface
-void BotVisionPlugin::TryFetchRayTrace(bool reportFailure)
-{
-    if (!mIsmm) return;
-    int returnCode = 0;
-    void* rayTrace = mIsmm->MetaFactory(RAYTRACE_INTERFACE_VERSION, &returnCode, nullptr);
-    cs2bv::bot_vision::SetRayTrace(rayTrace, returnCode);
-
-    if (!rayTrace && reportFailure)
-    {
-        char message[160];
-        std::snprintf(message, sizeof(message), "[BotVision] WARN: RayTrace %s unavailable (ret=%d)\n", RAYTRACE_INTERFACE_VERSION,
-                      returnCode);
-        Msg("%s", message);
-    }
-}
-
-// Retries ray tracing after every Metamod plugin has loaded
-void BotVisionPlugin::AllPluginsLoaded()
-{
-    if (!cs2bv::bot_vision::RayTraceReady()) TryFetchRayTrace(true);
 }
 
 // Removes commands, hooks, and acquired engine state

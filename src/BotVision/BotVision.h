@@ -15,12 +15,6 @@ void Remove();
 // Stores the engine interface used for server time
 void SetEngine(void* engine);
 
-// Stores the external ray-trace interface
-void SetRayTrace(void* rayTraceInterface, int returnCode);
-
-// Reports whether the external ray-trace interface is available
-bool RayTraceReady();
-
 // Records an HE detonation
 void OnHeDetonate(float x, float y, float z);
 
@@ -68,12 +62,6 @@ void SetBulletDuration(float value);
 
 // Returns the bullet tunnel lifetime
 float GetBulletDuration();
-
-// Sets the bullet trace range
-void SetBulletRange(float value);
-
-// Returns the bullet trace range
-float GetBulletRange();
 
 // Enables or disables bullet smoke tunnels
 void SetBulletHolesEnabled(bool enabled);

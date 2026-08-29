@@ -15,12 +15,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 // Removes the bullet hook and clears runtime state
 void Remove();
 
-// Stores the external ray-trace interface
-void SetRayTrace(void* rayTrace, int returnCode);
-
-// Reports whether the external ray-trace interface is available
-bool RayTraceReady();
-
 // Tests a line with the HE-to-smoke collision mask
 bool IsLineUnobstructed(const float* from, const float* to);
 
@@ -47,12 +41,6 @@ void SetDuration(float value);
 
 // Returns the bullet tunnel lifetime
 float GetDuration();
-
-// Sets the maximum captured trace range
-void SetRange(float value);
-
-// Returns the maximum captured trace range
-float GetRange();
 
 // Enables or disables bullet smoke tunnels
 void SetHolesEnabled(bool enabled);

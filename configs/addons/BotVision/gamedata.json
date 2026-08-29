@@ -40,6 +40,13 @@
     },
     "comment": "Per-pellet bullet trace."
   },
+  "CNavPhysicsInterface::TraceShape": {
+    "offsets": {
+      "windows": 3,
+      "linux": 5
+    },
+    "comment": "CNavPhysicsInterface trace-shape vtable slot."
+  },
   "CCSPlayer_WeaponServices::GetSlot": {
     "signatures": {
       "library": "server",

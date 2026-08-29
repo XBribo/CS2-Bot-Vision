@@ -31,7 +31,6 @@ constexpr bool kDefaultBulletHolesEnabled = true;
 constexpr float kDefaultBulletRadius = 20.0f;
 constexpr float kDefaultShotgunRadius = 80.0f;
 constexpr float kDefaultBulletDuration = 1.0f;
-constexpr float kDefaultBulletRange = 8192.0f;
 constexpr double kMaximumFixedPointValue = static_cast<double>(std::numeric_limits<int>::max()) / 1000.0 - 1.0;
 
 // Builds the packaged startup configuration
@@ -43,8 +42,7 @@ nlohmann::json BuildDefaultConfig()
                { { "enabled", kDefaultBulletHolesEnabled },
                  { "radius", kDefaultBulletRadius },
                  { "shotgun_radius", kDefaultShotgunRadius },
-                 { "duration", kDefaultBulletDuration },
-                 { "range", kDefaultBulletRange } } } };
+                 { "duration", kDefaultBulletDuration } } } };
 }
 
 // Reports one invalid startup setting
@@ -136,7 +134,6 @@ void ApplyStartupConfig(const nlohmann::json& config)
             ApplyNonNegativeFloat(bulletHoles, "radius", "bullet_holes.radius", SetBulletRadius);
             ApplyNonNegativeFloat(bulletHoles, "shotgun_radius", "bullet_holes.shotgun_radius", SetBulletRadiusShotgun);
             ApplyNonNegativeFloat(bulletHoles, "duration", "bullet_holes.duration", SetBulletDuration);
-            ApplyNonNegativeFloat(bulletHoles, "range", "bullet_holes.range", SetBulletRange);
         }
     }
 }
@@ -242,12 +239,6 @@ void Remove()
 // Stores the engine interface for shared server time
 void SetEngine(void* engine) { game_time::SetEngine(engine); }
 
-// Forwards the external ray-trace interface to bullet capture
-void SetRayTrace(void* rayTraceInterface, int returnCode) { bullet_vision::SetRayTrace(rayTraceInterface, returnCode); }
-
-// Checks whether external ray tracing is ready
-bool RayTraceReady() { return bullet_vision::RayTraceReady(); }
-
 // Forwards an HE detonation to HE state
 void OnHeDetonate(float x, float y, float z) { he_vision::OnDetonate(x, y, z); }
 
@@ -295,12 +286,6 @@ void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
 
 // Returns the bullet tunnel lifetime
 float GetBulletDuration() { return bullet_vision::GetDuration(); }
-
-// Sets the bullet trace range
-void SetBulletRange(float value) { bullet_vision::SetRange(value); }
-
-// Returns the bullet trace range
-float GetBulletRange() { return bullet_vision::GetRange(); }
 
 // Stores the bullet tunnel enabled state
 void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }

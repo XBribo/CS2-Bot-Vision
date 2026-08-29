@@ -48,6 +48,12 @@ ModuleInfo ModuleCodeFromName(const char* moduleName);
 
 ModuleInfo ModuleFromInterfacePtr(void* interfacePtr);
 
+// Resolves a polymorphic class vtable from loaded module RTTI
+void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char* errorOut, size_t errorOutLen);
+
+// Checks whether an address belongs to executable image memory
+bool IsExecutableAddress(const void* address);
+
 void* ResolveSig(const nlohmann::json& gamedata, const ModuleInfo& module, const char* name, char* errorOut, size_t errorOutLen);
 
 // Read a platform offset from gamedata[name].offsets.<platform>; defVal if absent
