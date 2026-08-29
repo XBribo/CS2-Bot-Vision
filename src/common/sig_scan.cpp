@@ -4,9 +4,14 @@
 
 #include "sig_scan.h"
 
-#if defined(_WIN32)
-#include <Windows.h>
+#ifdef _WIN32
+#include <Windows.h> // NOLINT(misc-include-cleaner)
+#include <libloaderapi.h>
+#include <memoryapi.h>
+#include <minwindef.h>
 #include <psapi.h>
+#include <processthreadsapi.h>
+#include <winnt.h>
 #else
 #include <dlfcn.h>
 #include <link.h>
@@ -16,9 +21,14 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
+#include <ios>
+#include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 namespace cs2bv::sig {
 namespace {
@@ -28,7 +38,12 @@ const char* BaseName(const char* path)
     if (!path) return "";
     const char* slash = std::strrchr(path, '/');
     const char* backslash = std::strrchr(path, '\\');
-    const char* base = slash && backslash ? std::max(slash, backslash) : (slash ? slash : backslash);
+    const char* base = nullptr;
+    if (slash && backslash) base = std::max(slash, backslash);
+    else if (slash)
+        base = slash;
+    else
+        base = backslash;
     return base ? base + 1 : path;
 }
 
@@ -45,17 +60,15 @@ void SetError(char* out, size_t outLen, const char* fmt, const char* a, const ch
 bool ContainsRange(const ModuleInfo& module, const void* address, size_t length)
 {
     if (!address || length == 0) return false;
-    const uintptr_t begin = reinterpret_cast<uintptr_t>(address);
+    const auto begin = reinterpret_cast<uintptr_t>(address);
     const uintptr_t end = begin + length;
     if (end < begin) return false;
 
-    for (const ModuleSegment& segment : module.segments)
-    {
-        const uintptr_t segmentBegin = reinterpret_cast<uintptr_t>(segment.base);
+    return std::ranges::any_of(module.segments, [begin, end](const ModuleSegment& segment) {
+        const auto segmentBegin = reinterpret_cast<uintptr_t>(segment.base);
         const uintptr_t segmentEnd = segmentBegin + segment.size;
-        if (segmentEnd >= segmentBegin && begin >= segmentBegin && end <= segmentEnd) return true;
-    }
-    return false;
+        return segmentEnd >= segmentBegin && begin >= segmentBegin && end <= segmentEnd;
+    });
 }
 
 // Finds every exact byte sequence in selected module segments
@@ -68,7 +81,7 @@ std::vector<void*> FindExactMatches(const ModuleInfo& module, const void* bytes,
     return FindPatternMatchesIn(module, pattern, wild);
 }
 
-#if defined(_WIN32)
+#ifdef _WIN32
 // Resolves module boundaries from a Windows module handle
 ModuleInfo ModuleFromHandle(HMODULE handle)
 {
@@ -80,7 +93,7 @@ ModuleInfo ModuleFromHandle(HMODULE handle)
 
     out.base = static_cast<unsigned char*>(mi.lpBaseOfDll);
     out.size = static_cast<size_t>(mi.SizeOfImage);
-    out.segments.push_back({ out.base, out.size });
+    out.segments.push_back({ .base = out.base, .size = out.size });
     return out;
 }
 
@@ -109,13 +122,13 @@ ModuleInfo ModuleSectionFromHandle(HMODULE handle, const char* sectionName)
         std::memcpy(name, section->Name, IMAGE_SIZEOF_SHORT_NAME);
         if (std::strcmp(name, sectionName) != 0) continue;
 
-        const size_t sectionSize = static_cast<size_t>(section->Misc.VirtualSize);
-        const size_t sectionOffset = static_cast<size_t>(section->VirtualAddress);
+        const auto sectionSize = static_cast<size_t>(section->Misc.VirtualSize);
+        const auto sectionOffset = static_cast<size_t>(section->VirtualAddress);
         if (sectionSize == 0 || sectionOffset >= image.size || sectionSize > image.size - sectionOffset) return out;
 
         out.base = image.base;
         out.size = image.size;
-        out.segments.push_back({ image.base + sectionOffset, sectionSize });
+        out.segments.push_back({ .base = image.base + sectionOffset, .size = sectionSize });
         return out;
     }
     return out;
@@ -274,7 +287,7 @@ bool LoadGamedata(const char* path, nlohmann::json& out)
 // Returns the gamedata key for the current platform
 const char* PlatformName()
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return "windows";
 #else
     return "linux";
@@ -315,7 +328,7 @@ bool ParseSigString(const std::string& sigStr, std::vector<uint8_t>& outBytes, s
             continue;
         }
         char* end = nullptr;
-        unsigned long v = std::strtoul(p, &end, 16);
+        const auto v = std::strtoul(p, &end, 16);
         if (end == p || end - p > 2 || v > 0xFF) return false;
         outBytes.push_back(static_cast<uint8_t>(v));
         outWild.push_back(false);
@@ -382,7 +395,7 @@ std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vec
 // Resolves a loaded module by basename
 ModuleInfo ModuleFromName(const char* moduleName)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return ModuleFromHandle(GetModuleHandleA(moduleName));
 #else
     FindByNameCtx ctx{};
@@ -395,7 +408,7 @@ ModuleInfo ModuleFromName(const char* moduleName)
 // Resolves executable code ranges from a loaded module
 ModuleInfo ModuleCodeFromName(const char* moduleName)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return ModuleSectionFromHandle(GetModuleHandleA(moduleName), ".text");
 #else
     FindByNameCtx ctx{};
@@ -412,7 +425,7 @@ ModuleInfo ModuleFromInterfacePtr(void* interfacePtr)
     void* vtable = *reinterpret_cast<void**>(interfacePtr);
     if (!vtable) return {};
 
-#if defined(_WIN32)
+#ifdef _WIN32
     MEMORY_BASIC_INFORMATION mbi{};
     if (!VirtualQuery(vtable, &mbi, sizeof(mbi))) return {};
     if (mbi.Type != MEM_IMAGE) return {};
@@ -434,8 +447,8 @@ void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char
         return nullptr;
     }
 
-#if defined(_WIN32)
-    const auto moduleHandle = reinterpret_cast<HMODULE>(module.base);
+#ifdef _WIN32
+    auto* const moduleHandle = reinterpret_cast<HMODULE>(module.base);
     const ModuleInfo data = ModuleSectionFromHandle(moduleHandle, ".data");
     const ModuleInfo rdata = ModuleSectionFromHandle(moduleHandle, ".rdata");
     if (!data || !rdata)
@@ -453,9 +466,9 @@ void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char
         if (!ContainsRange(data, nameAddress - 0x10, 0x10 + decoratedName.size())) continue;
 
         const auto* typeDescriptor = nameAddress - 0x10;
-        const uintptr_t descriptorOffset = static_cast<uintptr_t>(typeDescriptor - module.base);
+        const auto descriptorOffset = static_cast<uintptr_t>(typeDescriptor - module.base);
         if (descriptorOffset > UINT32_MAX) continue;
-        const uint32_t descriptorRva = static_cast<uint32_t>(descriptorOffset);
+        const auto descriptorRva = static_cast<uint32_t>(descriptorOffset);
         for (void* descriptorMatch : FindExactMatches(rdata, &descriptorRva, sizeof(descriptorRva)))
         {
             auto* descriptorReference = static_cast<unsigned char*>(descriptorMatch);
@@ -468,11 +481,11 @@ void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char
             std::memcpy(&vtableOffset, locator + sizeof(signature), sizeof(vtableOffset));
             if (signature != 1 || vtableOffset != 0) continue;
 
-            const uintptr_t locatorAddress = reinterpret_cast<uintptr_t>(locator);
+            const auto locatorAddress = reinterpret_cast<uintptr_t>(locator);
             for (void* locatorMatch : FindExactMatches(rdata, &locatorAddress, sizeof(locatorAddress)))
             {
                 auto* vtable = reinterpret_cast<void**>(static_cast<unsigned char*>(locatorMatch) + sizeof(void*));
-                if (!ContainsRange(rdata, vtable, sizeof(void*)) || !ContainsRange(module, vtable[0], 1) ||
+                if (!ContainsRange(rdata, static_cast<const void*>(vtable), sizeof(void*)) || !ContainsRange(module, vtable[0], 1) ||
                     !IsExecutableAddress(vtable[0]))
                 {
                     continue;
@@ -516,7 +529,7 @@ void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char
 bool IsExecutableAddress(const void* address)
 {
     if (!address) return false;
-#if defined(_WIN32)
+#ifdef _WIN32
     MEMORY_BASIC_INFORMATION memory{};
     if (!VirtualQuery(address, &memory, sizeof(memory)) || memory.State != MEM_COMMIT || (memory.Protect & PAGE_GUARD) != 0) return false;
     const DWORD protection = memory.Protect & 0xFF;

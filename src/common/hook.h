@@ -1,6 +1,6 @@
 // Inline hook wrapper over funchook
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <funchook.h>
 

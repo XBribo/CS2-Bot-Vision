@@ -1,10 +1,12 @@
 // Bullet trace capture and temporary smoke tunnels
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include "sig_scan.h"
 
 #include <nlohmann/json.hpp>
+
+#include <cstdint>
 
 namespace cs2bv::bullet_vision {
 using DensitySamplerFn = float (*)(const float* from, const float* to);
@@ -52,7 +54,7 @@ bool GetHolesEnabled();
 int GetActiveHoleCount();
 
 // Returns the number of captured pellet hook calls
-long long GetBulletCount();
+int64_t GetBulletCount();
 
 // Formats the most recently captured pellet
 const char* GetLastBulletInfo();

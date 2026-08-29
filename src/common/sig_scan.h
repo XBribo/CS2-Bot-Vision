@@ -1,6 +1,6 @@
 // Signature scanning and gamedata helpers
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <cstdint>
 #include <cstddef>

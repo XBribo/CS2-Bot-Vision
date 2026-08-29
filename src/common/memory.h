@@ -1,13 +1,13 @@
 // Validated runtime memory reads and diagnostics
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
 namespace cs2bv::memory {
-enum class FailureDomain
+enum class FailureDomain : uint8_t
 {
     Scene,
     Bot,
@@ -36,21 +36,21 @@ template <typename T> bool Read(const void* base, size_t offset, T& out, Failure
         return false;
     }
 
-    const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(base);
+    const auto baseAddress = reinterpret_cast<uintptr_t>(base);
     if (offset > UINTPTR_MAX - baseAddress)
     {
         RecordFailure(domain);
         return false;
     }
 
-    const void* address = reinterpret_cast<const void*>(baseAddress + offset);
+    const void* address = reinterpret_cast<const void*>(baseAddress + offset); // NOLINT(performance-no-int-to-ptr)
     if (!IsReadable(address, sizeof(T)))
     {
         RecordFailure(domain);
         return false;
     }
 
-    std::memcpy(&out, address, sizeof(T));
+    std::memcpy(static_cast<void*>(&out), address, sizeof(T));
     return true;
 }
 } // namespace cs2bv::memory

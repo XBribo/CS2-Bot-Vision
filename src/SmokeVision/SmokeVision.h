@@ -1,12 +1,13 @@
 // Smoke visibility hooks and per-bot threshold state
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include "sig_scan.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <cstdint>
 
 namespace cs2bv::smoke_vision {
 // Installs the required smoke hook and optional per-bot hook
@@ -31,10 +32,10 @@ float DensityInLine(const float* from, const float* to);
 bool HasSmokeNearPoint(const float* point, float radius);
 
 // Returns the number of smoke hook calls
-long long GetHitCount();
+int64_t GetHitCount();
 
 // Returns the number of lines blocked by density
-long long GetBlockedCount();
+int64_t GetBlockedCount();
 
 // Returns the smoke hook diagnostic state
 const char* GetHookedStatus();
@@ -70,13 +71,13 @@ int GetLastBotSlot();
 bool IsVisiblePosHooked();
 
 // Returns the per-bot hook call count
-long long GetIsVisiblePosCalls();
+int64_t GetIsVisiblePosCalls();
 
 // Returns the last controller handle observed by the per-bot hook
 unsigned int GetLastControllerHandle();
 
 // Returns the last pawn pointer observed by the per-bot hook
-unsigned long long GetLastPawnPointer();
+uint64_t GetLastPawnPointer();
 
 // Adds one player slot to the smoke reveal set
 void AddRevealSlot(int slot);
@@ -88,7 +89,7 @@ void RemoveRevealSlot(int slot);
 void ClearReveals();
 
 // Returns the selected reveal slot mask
-unsigned long long GetRevealMask();
+uint64_t GetRevealMask();
 
 // Returns one revealed player's latched controller handle
 unsigned int GetRevealHandle(int slot);

@@ -1,10 +1,10 @@
 // Cross-platform plugin helpers
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <string>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #define CS2BV_FASTCALL __fastcall
 #else
 #define CS2BV_FASTCALL

@@ -2,10 +2,11 @@
 
 #include "memory.h"
 
-#if defined(_WIN32)
-#include <Windows.h>
-#else
-#include <cstdio>
+#ifdef _WIN32
+#include <Windows.h> // NOLINT(misc-include-cleaner)
+#include <memoryapi.h>
+#include <minwindef.h>
+#include <winnt.h>
 #endif
 
 #include <array>
@@ -14,28 +15,31 @@
 #include <cstdio>
 
 namespace cs2bv::memory {
-static std::array<std::atomic<long long>, static_cast<size_t>(FailureDomain::Count)> g_failures{};
+namespace {
+std::array<std::atomic<int64_t>, static_cast<size_t>(FailureDomain::Count)> g_failures{};
 
-#if !defined(_WIN32)
+#ifndef _WIN32
 static thread_local uintptr_t g_cachedRegionStart = 0;
 static thread_local uintptr_t g_cachedRegionEnd = 0;
 static thread_local bool g_cachedRegionReadable = false;
 #endif
+} // namespace
 
 // Checks every virtual-memory region covered by an address range
 bool IsReadable(const void* address, size_t size)
 {
     if (!address || size == 0) return false;
 
-    uintptr_t cursor = reinterpret_cast<uintptr_t>(address);
+    auto cursor = reinterpret_cast<uintptr_t>(address);
     if (size > UINTPTR_MAX - cursor) return false;
     const uintptr_t end = cursor + size;
 
     while (cursor < end)
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         MEMORY_BASIC_INFORMATION memoryInfo{};
-        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &memoryInfo, sizeof(memoryInfo)) == 0) return false;
+        const void* cursorAddress = reinterpret_cast<const void*>(cursor); // NOLINT(performance-no-int-to-ptr)
+        if (VirtualQuery(cursorAddress, &memoryInfo, sizeof(memoryInfo)) == 0) return false;
         if (memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) return false;
 
         const DWORD protection = memoryInfo.Protect & 0xFF;
@@ -44,7 +48,7 @@ bool IsReadable(const void* address, size_t size)
                               protection == PAGE_EXECUTE_WRITECOPY;
         if (!readable) return false;
 
-        const uintptr_t regionStart = reinterpret_cast<uintptr_t>(memoryInfo.BaseAddress);
+        const auto regionStart = reinterpret_cast<uintptr_t>(memoryInfo.BaseAddress);
         if (memoryInfo.RegionSize > UINTPTR_MAX - regionStart) return false;
         const uintptr_t regionEnd = regionStart + memoryInfo.RegionSize;
         if (regionEnd <= cursor) return false;
@@ -67,8 +71,8 @@ bool IsReadable(const void* address, size_t size)
         char line[256] = {};
         while (std::fgets(line, sizeof(line), maps))
         {
-            unsigned long long parsedStart = 0;
-            unsigned long long parsedEnd = 0;
+            uint64_t parsedStart = 0;
+            uint64_t parsedEnd = 0;
             if (std::sscanf(line, "%llx-%llx %4s", &parsedStart, &parsedEnd, permissions) != 3) continue;
             if (cursor < static_cast<uintptr_t>(parsedStart) || cursor >= static_cast<uintptr_t>(parsedEnd)) continue;
 
@@ -91,7 +95,7 @@ bool IsReadable(const void* address, size_t size)
 // Increments a subsystem failure counter
 void RecordFailure(FailureDomain domain)
 {
-    const size_t index = static_cast<size_t>(domain);
+    const auto index = static_cast<size_t>(domain);
     if (index < g_failures.size()) g_failures[index].fetch_add(1, std::memory_order_relaxed);
 }
 

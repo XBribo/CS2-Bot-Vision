@@ -8,7 +8,9 @@
 #include "memory.h"
 #include "platform.h"
 #include "schema_resolver.h"
+#include "sig_scan.h"
 
+#include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
 
 #include <atomic>
@@ -17,51 +19,53 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <numbers>
 #include <string>
 #include <vector>
 
 namespace cs2bv::smoke_vision {
+namespace {
 using IsVisibleThroughSmokeFn = bool(CS2BV_FASTCALL*)(void* self, const void* from, const void* to);
 using GetSmokeDensityInLineFn = float(CS2BV_FASTCALL*)(const float* from, const float* to, float* outClosest);
 using IsVisiblePosFn = int64_t(CS2BV_FASTCALL*)(int64_t self, int64_t position, char testFov, void* entity);
 using IsVisiblePlayerFn = bool(CS2BV_FASTCALL*)(int64_t self, void* player, char testFov, unsigned char* visibleParts);
 
-static constexpr const char* kSmokeFunctionName = "CBotManager::IsVisibleThroughSmoke";
-static constexpr const char* kAutoListName = "g_AutoList_SmokeProj_Head_Server";
-static constexpr const char* kDensityFunctionName = "GetSmokeDensityInLine";
-static constexpr const char* kVisiblePosName = "CCSBot::IsVisiblePos";
-static constexpr const char* kVisiblePlayerName = "CCSBot::IsVisiblePlayer";
-static constexpr int kMaxBots = 64;
-static constexpr int kDefaultThreshold = INT_MIN;
+constexpr const char* kSmokeFunctionName = "CBotManager::IsVisibleThroughSmoke";
+constexpr const char* kAutoListName = "g_AutoList_SmokeProj_Head_Server";
+constexpr const char* kDensityFunctionName = "GetSmokeDensityInLine";
+constexpr const char* kVisiblePosName = "CCSBot::IsVisiblePos";
+constexpr const char* kVisiblePlayerName = "CCSBot::IsVisiblePlayer";
+constexpr int kMaxBots = 64;
+constexpr int kDefaultThreshold = INT_MIN;
 
-static IsVisibleThroughSmokeFn g_originalIsVisibleThroughSmoke = nullptr;
-static GetSmokeDensityInLineFn g_getSmokeDensityInLine = nullptr;
-static IsVisiblePosFn g_originalIsVisiblePos = nullptr;
-static IsVisiblePlayerFn g_originalIsVisiblePlayer = nullptr;
-static Hook g_smokeHook;
-static Hook g_visiblePosHook;
-static Hook g_visiblePlayerHook;
-static void** g_autoListHead = nullptr;
+IsVisibleThroughSmokeFn g_originalIsVisibleThroughSmoke = nullptr;
+GetSmokeDensityInLineFn g_getSmokeDensityInLine = nullptr;
+IsVisiblePosFn g_originalIsVisiblePos = nullptr;
+IsVisiblePlayerFn g_originalIsVisiblePlayer = nullptr;
+Hook g_smokeHook;
+Hook g_visiblePosHook;
+Hook g_visiblePlayerHook;
+void** g_autoListHead = nullptr;
 
-static std::atomic<long long> g_hitCount{ 0 };
-static std::atomic<long long> g_blockedCount{ 0 };
-static std::string g_hookedStatus = "not_attempted";
-static std::atomic<int> g_smokeMode{ 0 };
-static std::atomic<int> g_densityThresholdMilli{ 230 };
+std::atomic<int64_t> g_hitCount{ 0 };
+std::atomic<int64_t> g_blockedCount{ 0 };
+std::string g_hookedStatus = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
+std::atomic<int> g_smokeMode{ 0 };
+std::atomic<int> g_densityThresholdMilli{ 230 };
 
-static int g_controllerHandleOffset = -1;
-static int g_playerInBotOffset = -1;
-static std::atomic<int> g_botThresholdMilli[kMaxBots];
-static std::atomic<int> g_botThresholdOverrideCount{ 0 };
-static std::atomic<unsigned int> g_cacheGeneration{ 1 };
-static thread_local int g_currentBotThresholdMilli = kDefaultThreshold;
-static std::atomic<int> g_lastBotSlot{ -1 };
-static std::atomic<long long> g_isVisiblePosCalls{ 0 };
-static std::atomic<unsigned int> g_lastControllerHandle{ 0 };
-static std::atomic<unsigned long long> g_lastPawnPointer{ 0 };
-static std::atomic<unsigned long long> g_revealMask{ 0 };
-static std::atomic<unsigned int> g_revealHandles[kMaxBots];
-static thread_local bool g_currentPlayerRevealed = false;
+int g_controllerHandleOffset = -1;
+int g_playerInBotOffset = -1;
+std::atomic<int> g_botThresholdMilli[kMaxBots];
+std::atomic<int> g_botThresholdOverrideCount{ 0 };
+std::atomic<unsigned int> g_cacheGeneration{ 1 };
+thread_local int g_currentBotThresholdMilli = kDefaultThreshold;
+std::atomic<int> g_lastBotSlot{ -1 };
+std::atomic<int64_t> g_isVisiblePosCalls{ 0 };
+std::atomic<unsigned int> g_lastControllerHandle{ 0 };
+std::atomic<uint64_t> g_lastPawnPointer{ 0 };
+std::atomic<uint64_t> g_revealMask{ 0 };
+std::atomic<unsigned int> g_revealHandles[kMaxBots];
+thread_local bool g_currentPlayerRevealed = false;
 
 struct BotThresholdCacheEntry
 {
@@ -71,20 +75,20 @@ struct BotThresholdCacheEntry
     unsigned int generation = 0;
 };
 
-static constexpr size_t kCacheSize = 256;
-static constexpr size_t kCacheProbeCount = 4;
-static constexpr unsigned int kCacheRefreshUses = 1024;
-static constexpr unsigned int kInvalidCacheRefreshUses = 32;
-static thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
+constexpr size_t kCacheSize = 256;
+constexpr size_t kCacheProbeCount = 4;
+constexpr unsigned int kCacheRefreshUses = 1024;
+constexpr unsigned int kInvalidCacheRefreshUses = 32;
+thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
 // Calls the resolved native density function for effect modules
-static float SampleNativeDensity(const float* from, const float* to)
+float SampleNativeDensity(const float* from, const float* to)
 {
-    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0f;
+    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0F;
 }
 
 // Applies HE and bullet effects to native server density
-static float AdjustClientDensity(const float* from, const float* to, float density)
+float AdjustClientDensity(const float* from, const float* to, float density)
 {
     float adjusted = density;
     if (bullet_vision::GetHolesEnabled()) adjusted = bullet_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
@@ -92,7 +96,7 @@ static float AdjustClientDensity(const float* from, const float* to, float densi
 }
 
 // Reports an install error to both the debug sink and plugin loader
-static void ReportError(char* error, size_t maxLength, const char* format, ...)
+void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
     char buffer[512];
     va_list arguments;
@@ -107,9 +111,9 @@ static void ReportError(char* error, size_t maxLength, const char* format, ...)
 }
 
 // Mixes a pointer for fixed-size cache indexing
-static uint64_t MixPointerValue(uintptr_t value)
+uint64_t MixPointerValue(uintptr_t value)
 {
-    uint64_t key = static_cast<uint64_t>(value);
+    auto key = static_cast<uint64_t>(value);
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccdULL;
     key ^= key >> 33;
@@ -117,7 +121,7 @@ static uint64_t MixPointerValue(uintptr_t value)
 }
 
 // Resolves a RIP-relative pointer from a matched instruction
-static void* ResolveRipRelative(unsigned char* signatureStart, int relativeOffset, int instructionLength)
+void* ResolveRipRelative(unsigned char* signatureStart, int relativeOffset, int instructionLength)
 {
     if (!signatureStart || relativeOffset <= 0 || instructionLength < relativeOffset + 4) return nullptr;
 
@@ -127,7 +131,7 @@ static void* ResolveRipRelative(unsigned char* signatureStart, int relativeOffse
 }
 
 // Reads an integer property from one gamedata entry
-static int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* key, int defaultValue)
+int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* key, int defaultValue)
 {
     auto entry = gamedata.find(name);
     if (entry == gamedata.end() || !entry->is_object()) return defaultValue;
@@ -137,7 +141,7 @@ static int GamedataInt(const nlohmann::json& gamedata, const char* name, const c
 }
 
 // Resolves a signature already replaced by a rel32 detour
-static void* ResolveWithDetourFallback(
+void* ResolveWithDetourFallback(
     const nlohmann::json& gamedata, const sig::ModuleInfo& module, const char* name, bool& usedFallback, char* error, size_t errorLength)
 {
     usedFallback = false;
@@ -204,7 +208,7 @@ static void* ResolveWithDetourFallback(
 }
 
 // Resolves the engine smoke projectile auto-list head
-static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
+void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
 {
     const std::string signature = sig::FindPlatformSig(gamedata, kAutoListName);
     if (signature.empty())
@@ -248,21 +252,23 @@ static void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::Modul
 }
 
 // Resolves a bot engine slot through its pawn controller handle
-static int BotSlotFromBot(int64_t bot)
+int BotSlotFromBot(int64_t bot)
 {
     if (!bot || g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) return -1;
 
     int64_t pawn = 0;
-    if (!memory::Read(reinterpret_cast<const void*>(bot), g_playerInBotOffset, pawn, memory::FailureDomain::Bot)) return -1;
-    g_lastPawnPointer.store(static_cast<unsigned long long>(pawn), std::memory_order_relaxed);
+    const void* botAddress = reinterpret_cast<const void*>(bot); // NOLINT(performance-no-int-to-ptr)
+    if (!memory::Read(botAddress, g_playerInBotOffset, pawn, memory::FailureDomain::Bot)) return -1;
+    g_lastPawnPointer.store(static_cast<uint64_t>(pawn), std::memory_order_relaxed);
     if (!pawn) return -1;
 
     uint32_t handle = 0;
-    if (!memory::Read(reinterpret_cast<const void*>(pawn), g_controllerHandleOffset, handle, memory::FailureDomain::Bot)) return -1;
+    const void* pawnAddress = reinterpret_cast<const void*>(pawn); // NOLINT(performance-no-int-to-ptr)
+    if (!memory::Read(pawnAddress, g_controllerHandleOffset, handle, memory::FailureDomain::Bot)) return -1;
     g_lastControllerHandle.store(handle, std::memory_order_relaxed);
-    if (handle == 0u || handle == 0xFFFFFFFFu) return -1;
+    if (handle == 0U || handle == 0xFFFFFFFFU) return -1;
 
-    const int controllerIndex = static_cast<int>(handle & 0x7FFFu);
+    const int controllerIndex = static_cast<int>(handle & 0x7FFFU);
     const int slot = controllerIndex - 1;
     if (slot < 0 || slot >= kMaxBots) return -1;
     g_lastBotSlot.store(slot, std::memory_order_relaxed);
@@ -270,22 +276,22 @@ static int BotSlotFromBot(int64_t bot)
 }
 
 // Checks and latches one player from the reveal slot mask
-static bool IsRevealedPlayer(void* player, unsigned long long revealMask)
+bool IsRevealedPlayer(void* player, uint64_t revealMask)
 {
     if (revealMask == 0 || !player || g_controllerHandleOffset < 0) return false;
 
     uint32_t handle = 0;
     std::memcpy(&handle, static_cast<const unsigned char*>(player) + g_controllerHandleOffset, sizeof(handle));
-    if (handle == 0u || handle == 0xFFFFFFFFu) return false;
+    if (handle == 0U || handle == 0xFFFFFFFFU) return false;
 
-    const int slot = static_cast<int>(handle & 0x7FFFu) - 1;
+    const int slot = static_cast<int>(handle & 0x7FFFU) - 1;
     if (slot < 0 || slot >= kMaxBots || (revealMask & (1ULL << slot)) == 0)
     {
         return false;
     }
 
     unsigned int expectedHandle = g_revealHandles[slot].load(std::memory_order_relaxed);
-    if (expectedHandle == 0u)
+    if (expectedHandle == 0U)
     {
         g_revealHandles[slot].compare_exchange_strong(expectedHandle, handle, std::memory_order_relaxed);
         expectedHandle = g_revealHandles[slot].load(std::memory_order_relaxed);
@@ -294,13 +300,10 @@ static bool IsRevealedPlayer(void* player, unsigned long long revealMask)
 }
 
 // Returns the cache index for one bot pointer
-static size_t BotThresholdCacheIndex(int64_t bot)
-{
-    return static_cast<size_t>(MixPointerValue(static_cast<uintptr_t>(bot))) & (kCacheSize - 1);
-}
+size_t BotThresholdCacheIndex(int64_t bot) { return static_cast<size_t>(MixPointerValue(static_cast<uintptr_t>(bot))) & (kCacheSize - 1); }
 
 // Returns a cached threshold and periodically revalidates the bot
-static int CachedThresholdFromBot(int64_t bot)
+int CachedThresholdFromBot(int64_t bot)
 {
     if (!bot) return kDefaultThreshold;
 
@@ -338,7 +341,7 @@ static int CachedThresholdFromBot(int64_t bot)
 }
 
 // Stamps a bot-specific threshold around the original visibility call
-static int64_t CS2BV_FASTCALL HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity)
+int64_t CS2BV_FASTCALL HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity)
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
     if (g_smokeMode.load(std::memory_order_relaxed) == 1 || g_botThresholdOverrideCount.load(std::memory_order_relaxed) == 0)
@@ -369,9 +372,9 @@ static int64_t CS2BV_FASTCALL HookedIsVisiblePos(int64_t self, int64_t position,
 }
 
 // Stamps target reveal state around one complete player visibility scan
-static bool CS2BV_FASTCALL HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts)
+bool CS2BV_FASTCALL HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts)
 {
-    const unsigned long long revealMask = g_revealMask.load(std::memory_order_acquire);
+    const uint64_t revealMask = g_revealMask.load(std::memory_order_acquire);
     if (revealMask == 0)
     {
         return g_originalIsVisiblePlayer(self, player, testFov, visibleParts);
@@ -385,7 +388,7 @@ static bool CS2BV_FASTCALL HookedIsVisiblePlayer(int64_t self, void* player, cha
 }
 
 // Replaces binary smoke visibility with density and hole checks
-static bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to)
+bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to)
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
     if (g_currentPlayerRevealed) return true;
@@ -405,7 +408,7 @@ static bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* f
     const float density = g_getSmokeDensityInLine(fromValues, toValues, nullptr);
     int thresholdMilli = g_densityThresholdMilli.load(std::memory_order_relaxed);
     if (g_currentBotThresholdMilli != kDefaultThreshold) thresholdMilli = g_currentBotThresholdMilli;
-    const float threshold = thresholdMilli * 0.001f;
+    const float threshold = thresholdMilli * 0.001F;
     if (density >= threshold)
     {
         if (AdjustClientDensity(fromValues, toValues, density) < threshold) return true;
@@ -415,6 +418,8 @@ static bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* f
     }
     return true;
 }
+
+} // namespace
 
 // Installs required and optional smoke hooks
 bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule, char* error, size_t maxLength)
@@ -485,8 +490,10 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         g_visiblePosHook.Remove();
         g_originalIsVisiblePos = nullptr;
         char warning[320];
-        const char* reason = g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0 ? "required offset unavailable"
-                                                                                      : (visibleTarget ? "funchook error" : visibleError);
+        const char* reason = visibleError;
+        if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "required offset unavailable";
+        else if (visibleTarget)
+            reason = "funchook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
         Msg("%s", warning);
     }
@@ -509,8 +516,10 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         g_visiblePlayerHook.Remove();
         g_originalIsVisiblePlayer = nullptr;
         char warning[320];
-        const char* reason =
-            g_controllerHandleOffset < 0 ? "required offset unavailable" : (visiblePlayerTarget ? "funchook error" : visiblePlayerError);
+        const char* reason = visiblePlayerError;
+        if (g_controllerHandleOffset < 0) reason = "required offset unavailable";
+        else if (visiblePlayerTarget)
+            reason = "funchook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
         Msg("%s", warning);
     }
@@ -540,51 +549,54 @@ bool AutoListReady() { return g_autoListHead != nullptr; }
 bool HasSmokeProjectiles()
 {
     void* head = nullptr;
-    return g_autoListHead && memory::Read(g_autoListHead, 0, head, memory::FailureDomain::Smoke) && head != nullptr;
+    return g_autoListHead && memory::Read(static_cast<const void*>(g_autoListHead), 0, head, memory::FailureDomain::Smoke) &&
+           head != nullptr;
 }
 
 // Calls the engine density function when available
 float DensityInLine(const float* from, const float* to)
 {
-    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0f;
+    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0F;
 }
 
 // Probes nearby native smoke density with occlusion checks
 bool HasSmokeNearPoint(const float* point, float radius)
 {
-    if (!point || radius <= 0.0f) return false;
+    if (!point || radius <= 0.0F) return false;
     if (!g_getSmokeDensityInLine) return HasSmokeProjectiles();
 
-    static constexpr float kDirections[][3] = { { 1.0f, 0.0f, 0.0f },
-                                                { -1.0f, 0.0f, 0.0f },
-                                                { 0.0f, 1.0f, 0.0f },
-                                                { 0.0f, -1.0f, 0.0f },
-                                                { 0.0f, 0.0f, 1.0f },
-                                                { 0.0f, 0.0f, -1.0f },
-                                                { 0.57735f, 0.57735f, 0.57735f },
-                                                { 0.57735f, 0.57735f, -0.57735f },
-                                                { 0.57735f, -0.57735f, 0.57735f },
-                                                { 0.57735f, -0.57735f, -0.57735f },
-                                                { -0.57735f, 0.57735f, 0.57735f },
-                                                { -0.57735f, 0.57735f, -0.57735f },
-                                                { -0.57735f, -0.57735f, 0.57735f },
-                                                { -0.57735f, -0.57735f, -0.57735f } };
+    static constexpr float kDirections[][3] = {
+        { 1.0F, 0.0F, 0.0F },
+        { -1.0F, 0.0F, 0.0F },
+        { 0.0F, 1.0F, 0.0F },
+        { 0.0F, -1.0F, 0.0F },
+        { 0.0F, 0.0F, 1.0F },
+        { 0.0F, 0.0F, -1.0F },
+        { std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float> },
+        { std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float> },
+        { std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float> },
+        { std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float> },
+        { -std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float> },
+        { -std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float> },
+        { -std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float>, std::numbers::inv_sqrt3_v<float> },
+        { -std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float>, -std::numbers::inv_sqrt3_v<float> }
+    };
 
     for (const auto& direction : kDirections)
     {
         float from[3] = { point[0], point[1], point[2] };
-        float to[3] = { point[0] + direction[0] * radius, point[1] + direction[1] * radius, point[2] + direction[2] * radius };
+        float to[3] = { point[0] + (direction[0] * radius), point[1] + (direction[1] * radius), point[2] + (direction[2] * radius) };
         float closest[3]{};
-        if (g_getSmokeDensityInLine(from, to, closest) > 0.0f && bullet_vision::IsLineUnobstructed(point, closest)) return true;
+        if (g_getSmokeDensityInLine(from, to, closest) > 0.0F && bullet_vision::IsLineUnobstructed(point, closest)) return true;
     }
     return false;
 }
 
 // Returns the smoke hook call count
-long long GetHitCount() { return g_hitCount.load(std::memory_order_relaxed); }
+int64_t GetHitCount() { return g_hitCount.load(std::memory_order_relaxed); }
 
 // Returns the blocked line count
-long long GetBlockedCount() { return g_blockedCount.load(std::memory_order_relaxed); }
+int64_t GetBlockedCount() { return g_blockedCount.load(std::memory_order_relaxed); }
 
 // Returns the smoke hook diagnostic state
 const char* GetHookedStatus() { return g_hookedStatus.c_str(); }
@@ -596,10 +608,10 @@ void SetMode(int mode) { g_smokeMode.store(mode, std::memory_order_relaxed); }
 int GetMode() { return g_smokeMode.load(std::memory_order_relaxed); }
 
 // Stores the global density threshold
-void SetDensityThreshold(float value) { g_densityThresholdMilli.store(static_cast<int>(value * 1000.0f), std::memory_order_relaxed); }
+void SetDensityThreshold(float value) { g_densityThresholdMilli.store(static_cast<int>(value * 1000.0F), std::memory_order_relaxed); }
 
 // Returns the global density threshold
-float GetDensityThreshold() { return g_densityThresholdMilli.load(std::memory_order_relaxed) * 0.001f; }
+float GetDensityThreshold() { return g_densityThresholdMilli.load(std::memory_order_relaxed) * 0.001F; }
 
 // Checks whether the density function was resolved
 bool DensityFunctionReady() { return g_getSmokeDensityInLine != nullptr; }
@@ -609,7 +621,7 @@ void SetBotDensityThreshold(int slot, float value)
 {
     if (slot < 0 || slot >= kMaxBots) return;
 
-    const int next = value < 0.0f ? kDefaultThreshold : static_cast<int>(value * 1000.0f);
+    const int next = value < 0.0F ? kDefaultThreshold : static_cast<int>(value * 1000.0F);
     const int previous = g_botThresholdMilli[slot].exchange(next, std::memory_order_relaxed);
     if (previous == next) return;
 
@@ -627,9 +639,9 @@ void SetBotDensityThreshold(int slot, float value)
 // Returns a slot-specific density threshold
 float GetBotDensityThreshold(int slot)
 {
-    if (slot < 0 || slot >= kMaxBots) return -1.0f;
+    if (slot < 0 || slot >= kMaxBots) return -1.0F;
     const int value = g_botThresholdMilli[slot].load(std::memory_order_relaxed);
-    return value == kDefaultThreshold ? -1.0f : value * 0.001f;
+    return value == kDefaultThreshold ? -1.0F : value * 0.001F;
 }
 
 // Returns the maximum bot slot count
@@ -642,13 +654,13 @@ int GetLastBotSlot() { return g_lastBotSlot.load(std::memory_order_relaxed); }
 bool IsVisiblePosHooked() { return g_originalIsVisiblePos != nullptr; }
 
 // Returns the per-bot hook call count
-long long GetIsVisiblePosCalls() { return g_isVisiblePosCalls.load(std::memory_order_relaxed); }
+int64_t GetIsVisiblePosCalls() { return g_isVisiblePosCalls.load(std::memory_order_relaxed); }
 
 // Returns the last controller handle
 unsigned int GetLastControllerHandle() { return g_lastControllerHandle.load(std::memory_order_relaxed); }
 
 // Returns the last pawn pointer
-unsigned long long GetLastPawnPointer() { return g_lastPawnPointer.load(std::memory_order_relaxed); }
+uint64_t GetLastPawnPointer() { return g_lastPawnPointer.load(std::memory_order_relaxed); }
 
 // Adds a reveal slot and resets its entity generation
 void AddRevealSlot(int slot)
@@ -670,14 +682,14 @@ void RemoveRevealSlot(int slot)
 void ClearReveals()
 {
     g_revealMask.store(0, std::memory_order_release);
-    for (int slot = 0; slot < kMaxBots; ++slot)
+    for (auto& revealHandle : g_revealHandles)
     {
-        g_revealHandles[slot].store(0, std::memory_order_relaxed);
+        revealHandle.store(0, std::memory_order_relaxed);
     }
 }
 
 // Returns the configured reveal mask
-unsigned long long GetRevealMask() { return g_revealMask.load(std::memory_order_acquire); }
+uint64_t GetRevealMask() { return g_revealMask.load(std::memory_order_acquire); }
 
 // Returns a revealed player's latched controller handle
 unsigned int GetRevealHandle(int slot)

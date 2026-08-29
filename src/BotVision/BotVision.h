@@ -1,8 +1,9 @@
 // BotVision module coordinator and public runtime API
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace cs2bv::bot_vision {
@@ -76,16 +77,16 @@ int GetActiveBulletHoleCount();
 const char* GetBulletDiag();
 
 // Returns the pellet hook call count
-long long GetBulletCount();
+int64_t GetBulletCount();
 
 // Returns the most recently captured pellet
 const char* GetLastBulletInfo();
 
 // Returns the smoke hook call count
-long long GetHitCount();
+int64_t GetHitCount();
 
 // Returns the smoke-blocked line count
-long long GetBlockedCount();
+int64_t GetBlockedCount();
 
 // Reports whether the smoke auto-list was resolved
 bool IsHookedActive();
@@ -130,13 +131,13 @@ int GetLastBotSlot();
 bool IsVisiblePosHooked();
 
 // Returns the per-bot visibility hook call count
-long long GetIsVisiblePosCalls();
+int64_t GetIsVisiblePosCalls();
 
 // Returns the last observed controller handle
 unsigned int GetLastCtrlHandle();
 
 // Returns the last observed pawn pointer
-unsigned long long GetLastPawnPtr();
+uint64_t GetLastPawnPtr();
 
 // Adds one player slot to the smoke reveal set
 void AddRevealSlot(int slot);
@@ -148,7 +149,7 @@ void RemoveRevealSlot(int slot);
 void ClearReveals();
 
 // Returns the selected reveal slot mask
-unsigned long long GetRevealMask();
+uint64_t GetRevealMask();
 
 // Returns one revealed player's latched controller handle
 unsigned int GetRevealHandle(int slot);

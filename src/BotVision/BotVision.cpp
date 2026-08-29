@@ -7,7 +7,6 @@
 #include "SmokeVision/SmokeVision.h"
 #include "game_time.h"
 #include "memory.h"
-#include "platform.h"
 #include "schema_resolver.h"
 #include "sig_scan.h"
 
@@ -15,23 +14,26 @@
 #include <tier0/dbg.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <iterator>
 #include <limits>
+#include <string>
 
 namespace cs2bv::bot_vision {
 namespace {
 constexpr int kDefaultSmokeMode = 0;
-constexpr float kDefaultDensityThreshold = 0.23f;
-constexpr float kDefaultHeRadius = 250.0f;
-constexpr float kDefaultHeDuration = 5.0f;
+constexpr float kDefaultDensityThreshold = 0.23F;
+constexpr float kDefaultHeRadius = 250.0F;
+constexpr float kDefaultHeDuration = 5.0F;
 constexpr bool kDefaultBulletHolesEnabled = true;
-constexpr float kDefaultBulletRadius = 20.0f;
-constexpr float kDefaultShotgunRadius = 80.0f;
-constexpr float kDefaultBulletDuration = 1.0f;
-constexpr double kMaximumFixedPointValue = static_cast<double>(std::numeric_limits<int>::max()) / 1000.0 - 1.0;
+constexpr float kDefaultBulletRadius = 20.0F;
+constexpr float kDefaultShotgunRadius = 80.0F;
+constexpr float kDefaultBulletDuration = 1.0F;
+constexpr double kMaximumFixedPointValue = (static_cast<double>(std::numeric_limits<int>::max()) / 1000.0) - 1.0;
 
 // Builds the packaged startup configuration
 nlohmann::json BuildDefaultConfig()
@@ -194,7 +196,7 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
     sig::ModuleInfo serverModule = sig::ModuleFromInterfacePtr(serverInterface);
     if (!serverModule)
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         serverModule = sig::ModuleFromName("server.dll");
 #else
         serverModule = sig::ModuleFromName("libserver.so");
@@ -300,16 +302,16 @@ int GetActiveBulletHoleCount() { return bullet_vision::GetActiveHoleCount(); }
 const char* GetBulletDiag() { return bullet_vision::GetDiagnostics(); }
 
 // Returns the captured pellet count
-long long GetBulletCount() { return bullet_vision::GetBulletCount(); }
+int64_t GetBulletCount() { return bullet_vision::GetBulletCount(); }
 
 // Returns the last captured pellet diagnostic
 const char* GetLastBulletInfo() { return bullet_vision::GetLastBulletInfo(); }
 
 // Returns the smoke hook call count
-long long GetHitCount() { return smoke_vision::GetHitCount(); }
+int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 
 // Returns the smoke-blocked line count
-long long GetBlockedCount() { return smoke_vision::GetBlockedCount(); }
+int64_t GetBlockedCount() { return smoke_vision::GetBlockedCount(); }
 
 // Checks whether the smoke auto-list was resolved
 bool IsHookedActive() { return smoke_vision::AutoListReady(); }
@@ -357,13 +359,13 @@ int GetLastBotSlot() { return smoke_vision::GetLastBotSlot(); }
 bool IsVisiblePosHooked() { return smoke_vision::IsVisiblePosHooked(); }
 
 // Returns the per-bot hook call count
-long long GetIsVisiblePosCalls() { return smoke_vision::GetIsVisiblePosCalls(); }
+int64_t GetIsVisiblePosCalls() { return smoke_vision::GetIsVisiblePosCalls(); }
 
 // Returns the last observed controller handle
 unsigned int GetLastCtrlHandle() { return smoke_vision::GetLastControllerHandle(); }
 
 // Returns the last observed pawn pointer
-unsigned long long GetLastPawnPtr() { return smoke_vision::GetLastPawnPointer(); }
+uint64_t GetLastPawnPtr() { return smoke_vision::GetLastPawnPointer(); }
 
 // Adds one smoke reveal slot
 void AddRevealSlot(int slot) { smoke_vision::AddRevealSlot(slot); }
@@ -375,7 +377,7 @@ void RemoveRevealSlot(int slot) { smoke_vision::RemoveRevealSlot(slot); }
 void ClearReveals() { smoke_vision::ClearReveals(); }
 
 // Returns the configured smoke reveal mask
-unsigned long long GetRevealMask() { return smoke_vision::GetRevealMask(); }
+uint64_t GetRevealMask() { return smoke_vision::GetRevealMask(); }
 
 // Returns one revealed player handle
 unsigned int GetRevealHandle(int slot) { return smoke_vision::GetRevealHandle(slot); }

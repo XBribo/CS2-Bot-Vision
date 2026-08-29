@@ -1,4 +1,4 @@
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 class IVEngineServer2;
 class CCommandContext;

@@ -3,15 +3,19 @@
 #include "schema_resolver.h"
 
 #include <schemasystem/schemasystem.h>
+#include <schemasystem/schematypes.h>
 
-#if defined(_WIN32)
-#include <Windows.h>
+#ifdef _WIN32
+#include <Windows.h> // NOLINT(misc-include-cleaner)
+#include <libloaderapi.h>
+#include <minwindef.h>
 #else
 #include <dlfcn.h>
 #include <link.h>
 #endif
 
 #include <cstring>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -20,9 +24,9 @@ using CreateIfaceFn = void* (*)(const char*, int*);
 
 namespace {
 ISchemaSystem* g_schemaSystem = nullptr;
-std::unordered_map<std::string, int> g_offsetCache;
+std::unordered_map<std::string, int> g_offsetCache; // NOLINT(bugprone-throwing-static-initialization)
 
-#if !defined(_WIN32)
+#ifndef _WIN32
 // Returns the final component of a Unix path
 const char* BaseName(const char* path)
 {
@@ -65,7 +69,7 @@ void* OpenLoadedModule(const char* moduleName)
 // Finds one class in the server or global schema scope
 CSchemaClassInfo* FindClass(const char* className)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     static constexpr const char* kServerScopes[] = { "server.dll", "libserver.so" };
 #else
     static constexpr const char* kServerScopes[] = { "libserver.so", "server.dll" };
@@ -82,18 +86,18 @@ CSchemaClassInfo* FindClass(const char* className)
 }
 
 // Finds a field recursively through the schema inheritance tree
-int FindFieldOffset(const CSchemaClassInfo* classInfo, const char* fieldName, int depth)
+int FindFieldOffset(const CSchemaClassInfo* classInfo, const char* fieldName, int depth) // NOLINT(misc-no-recursion)
 {
     if (!classInfo || !fieldName || depth > 32) return -1;
 
-    for (uint16 index = 0; index < classInfo->m_nFieldCount; ++index)
+    for (uint16_t index = 0; index < classInfo->m_nFieldCount; ++index)
     {
         const SchemaClassFieldData_t& field = classInfo->m_pFields[index];
         if (field.m_pszName && std::strcmp(field.m_pszName, fieldName) == 0) return field.m_nSingleInheritanceOffset;
     }
 
     if (!classInfo->m_pBaseClasses) return -1;
-    for (uint8 index = 0; index < classInfo->m_nBaseClassCount; ++index)
+    for (uint8_t index = 0; index < classInfo->m_nBaseClassCount; ++index)
     {
         const SchemaBaseClassInfoData_t& baseClass = classInfo->m_pBaseClasses[index];
         const int fieldOffset = FindFieldOffset(baseClass.m_pClass, fieldName, depth + 1);
@@ -108,7 +112,7 @@ bool Init()
 {
     if (g_schemaSystem) return true;
 
-#if defined(_WIN32)
+#ifdef _WIN32
     HMODULE module = GetModuleHandleA("schemasystem.dll");
     if (!module) return false;
     auto createInterface = reinterpret_cast<CreateIfaceFn>(GetProcAddress(module, "CreateInterface"));

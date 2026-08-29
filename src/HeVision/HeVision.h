@@ -1,6 +1,6 @@
 // HE grenade smoke-hole capture and state
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include "sig_scan.h"
 

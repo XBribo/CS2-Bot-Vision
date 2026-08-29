@@ -1,6 +1,6 @@
 // Runtime Source 2 schema field resolver
 
-#pragma once
+#pragma once // NOLINT(portability-avoid-pragma-once)
 
 namespace cs2bv::schema {
 // Resolves ISchemaSystem from the loaded schemasystem module

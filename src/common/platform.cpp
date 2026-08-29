@@ -2,17 +2,21 @@
 
 #include "platform.h"
 
-#if defined(_WIN32)
-#include <Windows.h>
+#ifdef _WIN32
+#include <Windows.h> // NOLINT(misc-include-cleaner)
+#include <libloaderapi.h>
+#include <minwindef.h>
+#include <winnt.h>
 #else
 #include <dlfcn.h>
 #endif
 
+#include <string>
 namespace cs2bv::platform {
 // Resolves the on-disk path of the module containing this function
 std::string SelfModulePath()
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     HMODULE module = nullptr;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                             reinterpret_cast<LPCSTR>(&SelfModulePath), &module))

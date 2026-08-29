@@ -1,6 +1,7 @@
 // BotVision Metamod:Source plugin entry point
 
 #include <ISmmPlugin.h>
+#include <ISmmPluginExt.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -56,11 +57,13 @@ class BotVisionPlugin : public ISmmPlugin
     const char* GetLogTag() override { return "BV"; }
 };
 
-BotVisionPlugin g_botVisionPlugin;
-PLUGIN_EXPOSE(BotVisionPlugin, g_botVisionPlugin);
+BotVisionPlugin g_botVisionPlugin; // NOLINT(misc-use-internal-linkage)
+PLUGIN_EXPOSE(BotVisionPlugin, // NOLINT(misc-use-internal-linkage,misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
+              g_botVisionPlugin);
 
+namespace {
 // Resolves gamedata.json beside the plugin directory
-static std::string ComputeGamedataPath()
+std::string ComputeGamedataPath()
 {
     std::filesystem::path path(cs2bv::platform::SelfModulePath());
     if (path.empty()) return "";
@@ -72,6 +75,7 @@ static std::string ComputeGamedataPath()
     }
     return (path / "gamedata.json").string();
 }
+} // namespace
 
 // Loads engine interfaces and installs the coordinated modules
 bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool /*late*/)
