@@ -7,6 +7,9 @@
 #include <memoryapi.h>
 #include <minwindef.h>
 #include <winnt.h>
+#else
+#include <sys/uio.h>
+#include <unistd.h>
 #endif
 
 #include <array>
@@ -18,12 +21,6 @@
 namespace cs2bv::memory {
 namespace {
 std::array<std::atomic<int64_t>, static_cast<size_t>(FailureDomain::Count)> g_failures{};
-
-#ifndef _WIN32
-static thread_local uintptr_t g_cachedRegionStart = 0;
-static thread_local uintptr_t g_cachedRegionEnd = 0;
-static thread_local bool g_cachedRegionReadable = false;
-#endif
 } // namespace
 
 // Checks every virtual-memory region covered by an address range
@@ -55,39 +52,23 @@ bool IsReadable(const void* address, size_t size)
         if (regionEnd <= cursor) return false;
         cursor = regionEnd;
 #else
-        if (cursor >= g_cachedRegionStart && cursor < g_cachedRegionEnd)
-        {
-            if (!g_cachedRegionReadable) return false;
-            cursor = g_cachedRegionEnd;
-            continue;
-        }
-
-        FILE* maps = std::fopen("/proc/self/maps", "r");
-        if (!maps) return false;
-
-        uintptr_t regionStart = 0;
-        uintptr_t regionEnd = 0;
-        bool readable = false;
-        char permissions[5] = {};
-        char line[256] = {};
-        while (std::fgets(line, sizeof(line), maps))
-        {
-            uint64_t parsedStart = 0;
-            uint64_t parsedEnd = 0;
-            if (std::sscanf(line, "%" SCNx64 "-%" SCNx64 " %4s", &parsedStart, &parsedEnd, permissions) != 3) continue;
-            if (cursor < static_cast<uintptr_t>(parsedStart) || cursor >= static_cast<uintptr_t>(parsedEnd)) continue;
-
-            regionStart = static_cast<uintptr_t>(parsedStart);
-            regionEnd = static_cast<uintptr_t>(parsedEnd);
-            readable = permissions[0] == 'r';
-            break;
-        }
-        std::fclose(maps);
-        if (!readable || regionEnd <= cursor) return false;
-        g_cachedRegionStart = regionStart;
-        g_cachedRegionEnd = regionEnd;
-        g_cachedRegionReadable = readable;
-        cursor = regionEnd;
+        // Probe the page through the kernel instead of parsing /proc/self/maps.
+        // process_vm_readv() on our own pid copies from the target range and
+        // fails with EFAULT (returns -1) when any byte of it is unmapped or not
+        // readable, without faulting the caller. It costs one syscall per page.
+        // The previous implementation opened /proc/self/maps and scanned every
+        // line with fgets()+sscanf() on each one-entry-cache miss; the IsVisible
+        // hooks call this hundreds of times per tick with rotating pointers, so
+        // that scan dominated the whole server frame.
+        static const pid_t selfPid = getpid();
+        static const uintptr_t pageSize = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+        const uintptr_t pageEnd = (cursor & ~(pageSize - 1)) + pageSize;
+        const uintptr_t chunkEnd = pageEnd < end ? pageEnd : end;
+        unsigned char scratch = 0;
+        iovec local{&scratch, 1};
+        iovec remote{reinterpret_cast<void*>(cursor), 1}; // NOLINT(performance-no-int-to-ptr)
+        if (process_vm_readv(selfPid, &local, 1, &remote, 1, 0) != 1) return false;
+        cursor = chunkEnd;
 #endif
     }
     return true;
