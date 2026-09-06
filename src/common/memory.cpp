@@ -14,6 +14,7 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -21,7 +22,44 @@
 namespace cs2bv::memory {
 namespace {
 std::array<std::atomic<int64_t>, static_cast<size_t>(FailureDomain::Count)> g_failures{};
+#ifndef _WIN32
+std::atomic<int> g_lastReadError{ 0 };
+#endif
 } // namespace
+
+#ifndef _WIN32
+// Reads the whole range in one syscall without dereferencing the source in user space
+bool ReadBytes(const void* address, void* out, size_t size)
+{
+    if (!address || !out || size == 0 || size > UINTPTR_MAX - reinterpret_cast<uintptr_t>(address)) return false;
+
+    static const pid_t selfPid = getpid();
+    iovec local{ out, size };
+    iovec remote{ const_cast<void*>(address), size };
+    const ssize_t copied = process_vm_readv(selfPid, &local, 1, &remote, 1, 0);
+    if (copied >= 0 && static_cast<size_t>(copied) == size) return true;
+
+    g_lastReadError.store(copied < 0 ? errno : EFAULT, std::memory_order_relaxed);
+    return false;
+}
+
+// Rejects unsupported or restricted Linux environments before registering plugin state
+bool Initialize(char* error, size_t maxLength)
+{
+    const unsigned char probe = 0x5A;
+    unsigned char copied = 0;
+    if (ReadBytes(&probe, &copied, sizeof(probe)) && copied == probe) return true;
+
+    RecordFailure(FailureDomain::Install);
+    const int readError = g_lastReadError.load(std::memory_order_relaxed);
+    if (error && maxLength > 0)
+    {
+        std::snprintf(error, maxLength, "process_vm_readv self-read failed (errno=%d: %s); check kernel/seccomp policy", readError,
+                      std::strerror(readError));
+    }
+    return false;
+}
+#endif
 
 // Checks every virtual-memory region covered by an address range
 bool IsReadable(const void* address, size_t size)
@@ -52,22 +90,13 @@ bool IsReadable(const void* address, size_t size)
         if (regionEnd <= cursor) return false;
         cursor = regionEnd;
 #else
-        // Probe the page through the kernel instead of parsing /proc/self/maps.
-        // process_vm_readv() on our own pid copies from the target range and
-        // fails with EFAULT (returns -1) when any byte of it is unmapped or not
-        // readable, without faulting the caller. It costs one syscall per page.
-        // The previous implementation opened /proc/self/maps and scanned every
-        // line with fgets()+sscanf() on each one-entry-cache miss; the IsVisible
-        // hooks call this hundreds of times per tick with rotating pointers, so
-        // that scan dominated the whole server frame.
-        static const pid_t selfPid = getpid();
+        // Only standalone probes use page stepping; field reads copy the full range.
         static const uintptr_t pageSize = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
         const uintptr_t pageEnd = (cursor & ~(pageSize - 1)) + pageSize;
         const uintptr_t chunkEnd = pageEnd < end ? pageEnd : end;
         unsigned char scratch = 0;
-        iovec local{&scratch, 1};
-        iovec remote{reinterpret_cast<void*>(cursor), 1}; // NOLINT(performance-no-int-to-ptr)
-        if (process_vm_readv(selfPid, &local, 1, &remote, 1, 0) != 1) return false;
+        const void* probe = reinterpret_cast<const void*>(cursor); // NOLINT(performance-no-int-to-ptr)
+        if (!ReadBytes(probe, &scratch, sizeof(scratch))) return false;
         cursor = chunkEnd;
 #endif
     }
@@ -84,7 +113,7 @@ void RecordFailure(FailureDomain domain)
 // Formats the current subsystem counters
 const char* Diagnostics()
 {
-    static char buffer[192];
+    static char buffer[224];
     std::snprintf(buffer, sizeof(buffer),
                   "scene=%" PRId64 " bot=%" PRId64 " weapon=%" PRId64 " bullet=%" PRId64 " smoke=%" PRId64 " install=%" PRId64,
                   g_failures[static_cast<size_t>(FailureDomain::Scene)].load(std::memory_order_relaxed),
@@ -93,6 +122,10 @@ const char* Diagnostics()
                   g_failures[static_cast<size_t>(FailureDomain::Bullet)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Smoke)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Install)].load(std::memory_order_relaxed));
+#ifndef _WIN32
+    const size_t written = std::strlen(buffer);
+    std::snprintf(buffer + written, sizeof(buffer) - written, " linux_read_errno=%d", g_lastReadError.load(std::memory_order_relaxed));
+#endif
     return buffer;
 }
 } // namespace cs2bv::memory

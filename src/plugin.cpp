@@ -15,6 +15,7 @@
 
 #include "BotVision/BotVision.h"
 #include "common/commands.h"
+#include "common/memory.h"
 #include "common/platform.h"
 
 class BotVisionPlugin : public ISmmPlugin
@@ -48,7 +49,7 @@ class BotVisionPlugin : public ISmmPlugin
     const char* GetLicense() override { return "AGPL3.0"; }
 
     // Returns plugin version metadata
-    const char* GetVersion() override { return "0.2.5"; }
+    const char* GetVersion() override { return "0.2.6"; }
 
     // Returns plugin build date metadata
     const char* GetDate() override { return __DATE__; }
@@ -81,6 +82,10 @@ std::string ComputeGamedataPath()
 bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool /*late*/)
 {
     PLUGIN_SAVEVARS();
+
+#ifndef _WIN32
+    if (!cs2bv::memory::Initialize(error, maxlen)) return false;
+#endif
 
     cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bv::commands::g_engine)
