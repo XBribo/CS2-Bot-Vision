@@ -4,7 +4,7 @@
 
 #include "BulletVision/BulletVision.h"
 #include "HeVision/HeVision.h"
-#include "hook.h"
+#include "hooks.h"
 #include "memory.h"
 #include "platform.h"
 #include "schema_resolver.h"
@@ -25,10 +25,7 @@
 
 namespace cs2bv::smoke_vision {
 namespace {
-using IsVisibleThroughSmokeFn = bool(CS2BV_FASTCALL*)(void* self, const void* from, const void* to);
 using GetSmokeDensityInLineFn = float(CS2BV_FASTCALL*)(const float* from, const float* to, float* outClosest);
-using IsVisiblePosFn = int64_t(CS2BV_FASTCALL*)(int64_t self, int64_t position, char testFov, void* entity);
-using IsVisiblePlayerFn = bool(CS2BV_FASTCALL*)(int64_t self, void* player, char testFov, unsigned char* visibleParts);
 
 constexpr const char* kSmokeFunctionName = "CBotManager::IsVisibleThroughSmoke";
 constexpr const char* kAutoListName = "g_AutoList_SmokeProj_Head_Server";
@@ -38,13 +35,10 @@ constexpr const char* kVisiblePlayerName = "CCSBot::IsVisiblePlayer";
 constexpr int kMaxBots = 64;
 constexpr int kDefaultThreshold = INT_MIN;
 
-IsVisibleThroughSmokeFn g_originalIsVisibleThroughSmoke = nullptr;
 GetSmokeDensityInLineFn g_getSmokeDensityInLine = nullptr;
-IsVisiblePosFn g_originalIsVisiblePos = nullptr;
-IsVisiblePlayerFn g_originalIsVisiblePlayer = nullptr;
-Hook g_smokeHook;
-Hook g_visiblePosHook;
-Hook g_visiblePlayerHook;
+hooks::NativeHook<bool, void*, const void*, const void*> g_smokeHook;
+hooks::NativeHook<int64_t, int64_t, int64_t, char, void*> g_visiblePosHook;
+hooks::NativeHook<bool, int64_t, void*, char, unsigned char*> g_visiblePlayerHook;
 void** g_autoListHead = nullptr;
 
 std::atomic<int64_t> g_hitCount{ 0 };
@@ -66,6 +60,8 @@ std::atomic<uint64_t> g_lastPawnPointer{ 0 };
 std::atomic<uint64_t> g_revealMask{ 0 };
 std::atomic<unsigned int> g_revealHandles[kMaxBots];
 thread_local bool g_currentPlayerRevealed = false;
+thread_local std::vector<int> g_thresholdFrames;
+thread_local std::vector<bool> g_revealFrames;
 
 struct BotThresholdCacheEntry
 {
@@ -340,69 +336,61 @@ int CachedThresholdFromBot(int64_t bot)
     return threshold;
 }
 
-// Stamps a bot-specific threshold around the original visibility call
-int64_t CS2BV_FASTCALL HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity)
+// Stamps a bot-specific threshold for this visibility invocation.
+KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity) noexcept
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
+    g_thresholdFrames.push_back(g_currentBotThresholdMilli);
     if (g_smokeMode.load(std::memory_order_relaxed) == 1 || g_botThresholdOverrideCount.load(std::memory_order_relaxed) == 0)
     {
-        return g_originalIsVisiblePos(self, position, testFov, entity);
+        return { KHook::Action::Ignore };
     }
 
-    const int threshold = CachedThresholdFromBot(self);
-    if (threshold == kDefaultThreshold)
-    {
-        if (g_currentBotThresholdMilli == kDefaultThreshold)
-        {
-            return g_originalIsVisiblePos(self, position, testFov, entity);
-        }
+    g_currentBotThresholdMilli = CachedThresholdFromBot(self);
+    return { KHook::Action::Ignore };
+}
 
-        const int previous = g_currentBotThresholdMilli;
-        g_currentBotThresholdMilli = kDefaultThreshold;
-        const int64_t result = g_originalIsVisiblePos(self, position, testFov, entity);
-        g_currentBotThresholdMilli = previous;
-        return result;
-    }
-
-    const int previous = g_currentBotThresholdMilli;
-    g_currentBotThresholdMilli = threshold;
-    const int64_t result = g_originalIsVisiblePos(self, position, testFov, entity);
-    g_currentBotThresholdMilli = previous;
-    return result;
+// Restores the enclosing invocation's threshold without changing its return value.
+KHook::Return<int64_t> IsVisiblePosPost(int64_t, int64_t, char, void*) noexcept
+{
+    g_currentBotThresholdMilli = g_thresholdFrames.back();
+    g_thresholdFrames.pop_back();
+    return { KHook::Action::Ignore };
 }
 
 // Stamps target reveal state around one complete player visibility scan
-bool CS2BV_FASTCALL HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts)
+KHook::Return<bool> HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts) noexcept
 {
+    g_revealFrames.push_back(g_currentPlayerRevealed);
     const uint64_t revealMask = g_revealMask.load(std::memory_order_acquire);
-    if (revealMask == 0)
-    {
-        return g_originalIsVisiblePlayer(self, player, testFov, visibleParts);
-    }
+    if (revealMask != 0) g_currentPlayerRevealed = IsRevealedPlayer(player, revealMask);
+    return { KHook::Action::Ignore };
+}
 
-    const bool previousReveal = g_currentPlayerRevealed;
-    g_currentPlayerRevealed = IsRevealedPlayer(player, revealMask);
-    const bool result = g_originalIsVisiblePlayer(self, player, testFov, visibleParts);
-    g_currentPlayerRevealed = previousReveal;
-    return result;
+// Restores reveal state even if another consumer superseded the original scan.
+KHook::Return<bool> IsVisiblePlayerPost(int64_t, void*, char, unsigned char*) noexcept
+{
+    g_currentPlayerRevealed = g_revealFrames.back();
+    g_revealFrames.pop_back();
+    return { KHook::Action::Ignore };
 }
 
 // Replaces binary smoke visibility with density and hole checks
-bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to)
+KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to) noexcept
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
-    if (g_currentPlayerRevealed) return true;
+    if (g_currentPlayerRevealed) return { KHook::Action::Supersede, true };
 
     if (!IsVolumeMode() || !from || !to || !g_getSmokeDensityInLine)
     {
-        return g_originalIsVisibleThroughSmoke(self, from, to);
+        return { KHook::Action::Ignore };
     }
 
     float fromValues[3]{};
     float toValues[3]{};
     if (!memory::Read(from, 0, fromValues, memory::FailureDomain::Smoke) || !memory::Read(to, 0, toValues, memory::FailureDomain::Smoke))
     {
-        return g_originalIsVisibleThroughSmoke(self, from, to);
+        return { KHook::Action::Ignore };
     }
 
     const float density = g_getSmokeDensityInLine(fromValues, toValues, nullptr);
@@ -411,12 +399,12 @@ bool CS2BV_FASTCALL HookedIsVisibleThroughSmoke(void* self, const void* from, co
     const float threshold = thresholdMilli * 0.001F;
     if (density >= threshold)
     {
-        if (AdjustClientDensity(fromValues, toValues, density) < threshold) return true;
+        if (AdjustClientDensity(fromValues, toValues, density) < threshold) return { KHook::Action::Supersede, true };
 
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
-        return false;
+        return { KHook::Action::Supersede, false };
     }
-    return true;
+    return { KHook::Action::Supersede, true };
 }
 
 } // namespace
@@ -445,17 +433,9 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     }
 
     ResolveAutoListHead(gamedata, serverModule);
-    if (!g_smokeHook.Create(target, reinterpret_cast<void*>(&HookedIsVisibleThroughSmoke),
-                            reinterpret_cast<void**>(&g_originalIsVisibleThroughSmoke)))
+    if (!g_smokeHook.Install(target, &HookedIsVisibleThroughSmoke))
     {
-        ReportError(error, maxLength, "funchook_prepare failed for %s", kSmokeFunctionName);
-        return false;
-    }
-    if (!g_smokeHook.Enable())
-    {
-        g_smokeHook.Remove();
-        g_originalIsVisibleThroughSmoke = nullptr;
-        ReportError(error, maxLength, "funchook_install failed for %s", kSmokeFunctionName);
+        ReportError(error, maxLength, "KHook installation failed for %s", kSmokeFunctionName);
         return false;
     }
 
@@ -478,22 +458,18 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
             ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError))
             : nullptr;
-    if (visibleTarget &&
-        g_visiblePosHook.Create(visibleTarget, reinterpret_cast<void*>(&HookedIsVisiblePos),
-                                reinterpret_cast<void**>(&g_originalIsVisiblePos)) &&
-        g_visiblePosHook.Enable())
+    if (visibleTarget && g_visiblePosHook.Install(visibleTarget, &HookedIsVisiblePos, &IsVisiblePosPost))
     {
         (void)chainedDetour;
     }
     else
     {
         g_visiblePosHook.Remove();
-        g_originalIsVisiblePos = nullptr;
         char warning[320];
         const char* reason = visibleError;
         if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "required offset unavailable";
         else if (visibleTarget)
-            reason = "funchook error";
+            reason = "KHook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
         Msg("%s", warning);
     }
@@ -504,22 +480,18 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
                                     ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour,
                                                                 visiblePlayerError, sizeof(visiblePlayerError))
                                     : nullptr;
-    if (visiblePlayerTarget &&
-        g_visiblePlayerHook.Create(visiblePlayerTarget, reinterpret_cast<void*>(&HookedIsVisiblePlayer),
-                                   reinterpret_cast<void**>(&g_originalIsVisiblePlayer)) &&
-        g_visiblePlayerHook.Enable())
+    if (visiblePlayerTarget && g_visiblePlayerHook.Install(visiblePlayerTarget, &HookedIsVisiblePlayer, &IsVisiblePlayerPost))
     {
         (void)chainedPlayerDetour;
     }
     else
     {
         g_visiblePlayerHook.Remove();
-        g_originalIsVisiblePlayer = nullptr;
         char warning[320];
         const char* reason = visiblePlayerError;
         if (g_controllerHandleOffset < 0) reason = "required offset unavailable";
         else if (visiblePlayerTarget)
-            reason = "funchook error";
+            reason = "KHook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
         Msg("%s", warning);
     }
@@ -530,11 +502,8 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 void Remove()
 {
     g_visiblePlayerHook.Remove();
-    g_originalIsVisiblePlayer = nullptr;
     g_visiblePosHook.Remove();
-    g_originalIsVisiblePos = nullptr;
     g_smokeHook.Remove();
-    g_originalIsVisibleThroughSmoke = nullptr;
     g_getSmokeDensityInLine = nullptr;
     g_autoListHead = nullptr;
 }
@@ -651,7 +620,7 @@ int GetMaxBots() { return kMaxBots; }
 int GetLastBotSlot() { return g_lastBotSlot.load(std::memory_order_relaxed); }
 
 // Checks whether the per-bot hook is installed
-bool IsVisiblePosHooked() { return g_originalIsVisiblePos != nullptr; }
+bool IsVisiblePosHooked() { return g_visiblePosHook.Active(); }
 
 // Returns the per-bot hook call count
 int64_t GetIsVisiblePosCalls() { return g_isVisiblePosCalls.load(std::memory_order_relaxed); }
@@ -699,7 +668,7 @@ unsigned int GetRevealHandle(int slot)
 }
 
 // Checks whether player visibility is hooked
-bool IsVisiblePlayerHooked() { return g_originalIsVisiblePlayer != nullptr; }
+bool IsVisiblePlayerHooked() { return g_visiblePlayerHook.Active(); }
 
 // Formats a diagnostic density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength)

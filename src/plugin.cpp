@@ -83,6 +83,12 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 {
     PLUGIN_SAVEVARS();
 
+    if (!KHook::__exported__khook)
+    {
+        std::snprintf(error, maxlen, "Metamod with KHook support is required");
+        return false;
+    }
+
 #ifndef _WIN32
     if (!cs2bv::memory::Initialize(error, maxlen)) return false;
 #endif

@@ -112,38 +112,14 @@ add_custom_command(
     VERBATIM
 )
 
-include(FetchContent)
-
-if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt")
-    set(FETCHCONTENT_SOURCE_DIR_FUNCHOOK "$ENV{FUNCHOOK_SOURCE}" CACHE PATH "")
+if(NOT EXISTS "${MMS}/third_party/khook/include/khook.hpp")
+    message(FATAL_ERROR "Metamod with KHook is required; initialize its recursive submodules.")
 endif()
-
-set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(FUNCHOOK_BUILD_STATIC ON CACHE BOOL "" FORCE)
-set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FUNCHOOK_INSTALL OFF CACHE BOOL "" FORCE)
-set(FUNCHOOK_DISASM distorm CACHE STRING "" FORCE)
-
-FetchContent_Declare(
-    funchook
-    GIT_REPOSITORY https://github.com/kubo/funchook.git
-    GIT_TAG v1.1.3
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES_RECURSE TRUE
-)
-
-FetchContent_MakeAvailable(funchook)
-set_target_properties(funchook-static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
     ${HL2SDK}/tier1/keyvalues3.cpp
     ${HL2SDK}/tier1/convar.cpp
-    ${MMS}/core/sourcehook/sourcehook.cpp
-    ${MMS}/core/sourcehook/sourcehook_impl_chookidman.cpp
-    ${MMS}/core/sourcehook/sourcehook_impl_chookmaninfo.cpp
-    ${MMS}/core/sourcehook/sourcehook_impl_cvfnptr.cpp
-    ${MMS}/core/sourcehook/sourcehook_impl_cproto.cpp
 )
 
 add_library(
@@ -179,7 +155,7 @@ target_include_directories(
     ${CMAKE_SOURCE_DIR}/third_party
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src
-    ${MMS}/core ${MMS}/core/sourcehook ${MMS}/core/sourcemm
+    ${MMS}/core ${MMS}/third_party/khook/include ${MMS}/core/sourcemm
     ${HL2SDK}/public
     ${HL2SDK}/public/engine
     ${HL2SDK}/public/game/server
@@ -210,7 +186,6 @@ if(WIN32)
     target_link_libraries(
         BotVision
         PRIVATE
-        funchook-static
         psapi
         ${HL2SDK_LIBDIR}/tier0.lib
         ${HL2SDK_LIBDIR}/mathlib.lib
@@ -240,7 +215,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(
         BotVision
         PRIVATE
-        funchook-static
         ${HL2SDK_LIBDIR}/libtier0.so
         ${HL2SDK_LIBDIR}/mathlib.a
         ${HL2SDK_LIBDIR}/interfaces.a

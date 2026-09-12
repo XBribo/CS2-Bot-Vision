@@ -4,7 +4,7 @@
 
 #include "SmokeVision/SmokeVision.h"
 #include "game_time.h"
-#include "hook.h"
+#include "hooks.h"
 #include "memory.h"
 #include "platform.h"
 #include "schema_resolver.h"
@@ -64,26 +64,27 @@ struct NativeTraceVector
     int growSize = 0;
 };
 
-using PelletTraceFn = int64_t(CS2BV_FASTCALL*)(int64_t a1,
-                                               void* a2,
-                                               int64_t a3,
-                                               float a4,
-                                               float a5,
-                                               int a6,
-                                               unsigned char a7,
-                                               int a8,
-                                               int a9,
-                                               float a10,
-                                               int64_t a11,
-                                               NativeTraceVector* a12,
-                                               float a13,
-                                               float a14,
-                                               int64_t a15,
-                                               int64_t a16,
-                                               int a17,
-                                               int a18,
-                                               void* a19,
-                                               int64_t a20);
+using PelletTraceHook = hooks::NativeHook<int64_t,
+                                          int64_t,
+                                          void*,
+                                          int64_t,
+                                          float,
+                                          float,
+                                          int,
+                                          unsigned char,
+                                          int,
+                                          int,
+                                          float,
+                                          int64_t,
+                                          NativeTraceVector*,
+                                          float,
+                                          float,
+                                          int64_t,
+                                          int64_t,
+                                          int,
+                                          int,
+                                          void*,
+                                          int64_t>;
 using TraceShapeFn = bool(CS2BV_FASTCALL*)(
     const void* self, const Ray_t& ray, const Vector& start, const Vector& end, CTraceFilter* filter, CGameTrace* trace);
 using GetSlotFn = void*(CS2BV_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
@@ -98,10 +99,17 @@ constexpr size_t kNativeTraceStartOffset = 0x78;
 constexpr size_t kNativeTraceEndOffset = 0x84;
 constexpr int kDensitySlices = 5;
 
-PelletTraceFn g_originalPelletTrace = nullptr;
 TraceShapeFn g_traceShape = nullptr;
 GetSlotFn g_getSlot = nullptr;
-Hook g_pelletTraceHook;
+PelletTraceHook g_pelletTraceHook;
+struct PelletFrame
+{
+    int64_t shooter;
+    int64_t angles;
+    NativeTraceVector* results;
+    int firstResultIndex;
+};
+thread_local std::vector<PelletFrame> g_pelletFrames;
 void** g_navPhysicsVtable = nullptr;
 
 int g_weaponServicesOffset = -1;
@@ -254,33 +262,37 @@ int CachedActiveWeaponDefinition(void* shooter)
     return definitionIndex;
 }
 
-// Calls the original pellet trace with its unmodified arguments
-int64_t CallOriginalPelletTrace(int64_t a1,
-                                void* a2,
-                                int64_t a3,
-                                float a4,
-                                float a5,
-                                int a6,
-                                unsigned char a7,
-                                int a8,
-                                int a9,
-                                float a10,
-                                int64_t a11,
-                                NativeTraceVector* a12,
-                                float a13,
-                                float a14,
-                                int64_t a15,
-                                int64_t a16,
-                                int a17,
-                                int a18,
-                                void* a19,
-                                int64_t a20)
+// Saves the result-vector boundary before native tracing appends any hits.
+KHook::Return<int64_t> PelletTracePre(int64_t a1,
+                                      void* a2,
+                                      int64_t a3,
+                                      float a4,
+                                      float a5,
+                                      int a6,
+                                      unsigned char a7,
+                                      int a8,
+                                      int a9,
+                                      float a10,
+                                      int64_t a11,
+                                      NativeTraceVector* a12,
+                                      float a13,
+                                      float a14,
+                                      int64_t a15,
+                                      int64_t a16,
+                                      int a17,
+                                      int a18,
+                                      void* a19,
+                                      int64_t a20) noexcept
 {
-    return g_originalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+    g_bulletCount.fetch_add(1, std::memory_order_relaxed);
+    const bool captureRequested = GetHolesEnabled() && smoke_vision::IsVolumeMode() && smoke_vision::HasSmokeProjectiles() && a12;
+    const int firstResultIndex = captureRequested && a12->count >= 0 && a12->count <= a12->capacity ? a12->count : -1;
+    g_pelletFrames.push_back({ a1, a3, a12, firstResultIndex });
+    return { KHook::Action::Ignore };
 }
 
 // Captures the first native trace result appended by one pellet call
-int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
+KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
                                          void* a2,
                                          int64_t a3,
                                          float a4,
@@ -299,19 +311,20 @@ int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
                                          int a17,
                                          int a18,
                                          void* a19,
-                                         int64_t a20)
+                                         int64_t a20) noexcept
 {
-    g_bulletCount.fetch_add(1, std::memory_order_relaxed);
-    const bool captureRequested = GetHolesEnabled() && smoke_vision::IsVolumeMode() && smoke_vision::HasSmokeProjectiles() && a12;
-    const int firstResultIndex = captureRequested && a12->count >= 0 && a12->count <= a12->capacity ? a12->count : -1;
-    const int64_t originalResult =
-        CallOriginalPelletTrace(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
-    if (firstResultIndex < 0) return originalResult;
+    const PelletFrame frame = g_pelletFrames.back();
+    g_pelletFrames.pop_back();
+    a1 = frame.shooter;
+    a3 = frame.angles;
+    a12 = frame.results;
+    const int firstResultIndex = frame.firstResultIndex;
+    if (firstResultIndex < 0) return { KHook::Action::Ignore };
 
     if (!a12->data || a12->count <= firstResultIndex || a12->count > a12->capacity)
     {
         g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return originalResult;
+        return { KHook::Action::Ignore };
     }
 
     const unsigned char* nativeTrace = a12->data + (static_cast<size_t>(firstResultIndex) * kNativeGameTraceStride);
@@ -321,7 +334,7 @@ int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
         !memory::Read(nativeTrace, kNativeTraceEndOffset, nativeEnd, memory::FailureDomain::Bullet))
     {
         g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return originalResult;
+        return { KHook::Action::Ignore };
     }
 
     float sourceValues[3] = { nativeStart[0], nativeStart[1], nativeStart[2] };
@@ -332,13 +345,14 @@ int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
         !std::isfinite(traceEnd[0]) || !std::isfinite(traceEnd[1]) || !std::isfinite(traceEnd[2]) || length <= 1e-4F)
     {
         g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return originalResult;
+        return { KHook::Action::Ignore };
     }
     for (float& component : direction)
         component /= length;
     g_nativeResultCount.fetch_add(1, std::memory_order_relaxed);
 
-    if (smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, traceEnd) <= 0.0F) return originalResult;
+    if (smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, traceEnd) <= 0.0F)
+        return { KHook::Action::Ignore };
 
     void* shooter = nullptr;
     if (a1)
@@ -369,7 +383,7 @@ int64_t CS2BV_FASTCALL HookedPelletTrace(int64_t a1,
         }
     }
 
-    return originalResult;
+    return { KHook::Action::Ignore };
 }
 
 } // namespace
@@ -408,20 +422,16 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     char pelletError[256] = { 0 };
     void* pelletTarget = sig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
     bool installed = false;
-    if (pelletTarget &&
-        g_pelletTraceHook.Create(pelletTarget, reinterpret_cast<void*>(&HookedPelletTrace),
-                                 reinterpret_cast<void**>(&g_originalPelletTrace)) &&
-        g_pelletTraceHook.Enable())
+    if (pelletTarget && g_pelletTraceHook.Install(pelletTarget, &PelletTracePre, &HookedPelletTrace))
     {
         installed = true;
     }
     else
     {
         g_pelletTraceHook.Remove();
-        g_originalPelletTrace = nullptr;
         char warning[320];
         std::snprintf(warning, sizeof(warning), "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
-                      pelletTarget ? "funchook error" : pelletError);
+                      pelletTarget ? "KHook error" : pelletError);
         Msg("%s", warning);
     }
 
@@ -447,7 +457,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 void Remove()
 {
     g_pelletTraceHook.Remove();
-    g_originalPelletTrace = nullptr;
     g_traceShape = nullptr;
     g_navPhysicsVtable = nullptr;
     g_getSlot = nullptr;

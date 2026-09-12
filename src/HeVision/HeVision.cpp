@@ -4,7 +4,7 @@
 
 #include "SmokeVision/SmokeVision.h"
 #include "game_time.h"
-#include "hook.h"
+#include "hooks.h"
 #include "memory.h"
 #include "platform.h"
 #include "schema_resolver.h"
@@ -41,13 +41,10 @@ struct HeInfluence
     float end;
 };
 
-using HeDetonateFn = int64_t(CS2BV_FASTCALL*)(void* self);
-
 constexpr const char* kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 constexpr size_t kMaxHeBlasts = 5;
 constexpr int kDensitySlices = 5;
-HeDetonateFn g_originalDetonate = nullptr;
-Hook g_detonateHook;
+hooks::NativeHook<int64_t, void*> g_detonateHook;
 
 int g_bodyComponentOffset = -1;
 int g_sceneNodeOffset = -1;
@@ -82,27 +79,27 @@ float DensityScale(float distance, float age, float radius, float duration)
 }
 
 // Captures the projectile origin before invoking the original detonation
-int64_t CS2BV_FASTCALL HookedDetonate(void* self)
+KHook::Return<int64_t> HookedDetonate(void* self) noexcept
 {
     if (self)
     {
         uintptr_t bodyComponent = 0;
         if (!memory::Read(self, g_bodyComponentOffset, bodyComponent, memory::FailureDomain::Scene) || !bodyComponent)
-            return g_originalDetonate(self);
+            return { KHook::Action::Ignore };
 
         uintptr_t sceneNode = 0;
         const void* bodyAddress = reinterpret_cast<const void*>(bodyComponent); // NOLINT(performance-no-int-to-ptr)
-        if (!memory::Read(bodyAddress, g_sceneNodeOffset, sceneNode, memory::FailureDomain::Scene)) return g_originalDetonate(self);
+        if (!memory::Read(bodyAddress, g_sceneNodeOffset, sceneNode, memory::FailureDomain::Scene)) return { KHook::Action::Ignore };
 
         if (sceneNode)
         {
             float origin[3]{};
             const void* sceneAddress = reinterpret_cast<const void*>(sceneNode); // NOLINT(performance-no-int-to-ptr)
-            if (!memory::Read(sceneAddress, g_absOriginOffset, origin, memory::FailureDomain::Scene)) return g_originalDetonate(self);
+            if (!memory::Read(sceneAddress, g_absOriginOffset, origin, memory::FailureDomain::Scene)) return { KHook::Action::Ignore };
             OnDetonate(origin[0], origin[1], origin[2]);
         }
     }
-    return g_originalDetonate(self);
+    return { KHook::Action::Ignore };
 }
 
 } // namespace
@@ -122,18 +119,16 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 
     char error[256] = { 0 };
     void* target = sig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
-    if (target && g_detonateHook.Create(target, reinterpret_cast<void*>(&HookedDetonate), reinterpret_cast<void**>(&g_originalDetonate)) &&
-        g_detonateHook.Enable())
+    if (target && g_detonateHook.Install(target, &HookedDetonate))
     {
         g_listenerStatus = "hook=ok";
         return true;
     }
 
     g_detonateHook.Remove();
-    g_originalDetonate = nullptr;
     char message[320];
     std::snprintf(message, sizeof(message), "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
-                  target ? "funchook error" : error);
+                  target ? "KHook error" : error);
     Msg("%s", message);
     g_listenerStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
@@ -143,7 +138,6 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
 void Remove()
 {
     g_detonateHook.Remove();
-    g_originalDetonate = nullptr;
     std::scoped_lock lock(g_blastMutex);
     g_blasts.clear();
 }
