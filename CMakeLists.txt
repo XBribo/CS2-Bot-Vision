@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BotVision VERSION 0.2.6 LANGUAGES CXX)
+project(BotVision VERSION 0.3.0 LANGUAGES CXX)
 
 # The base version lives here; -DPLUGIN_VERSION overrides it for a build.
 if(NOT DEFINED PLUGIN_VERSION)
