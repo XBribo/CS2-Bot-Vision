@@ -126,7 +126,7 @@ const char* BotVisionPlugin::GetName() { return "BotVision"; }
 // Returns the plugin description.
 const char* BotVisionPlugin::GetDescription() { return "Volumetric smoke bots."; }
 // Returns the plugin project URL.
-const char* BotVisionPlugin::GetURL() { return ""; }
+const char* BotVisionPlugin::GetURL() { return "https://github.com/XBribo/CS2-Bot-Vision"; }
 // Returns the plugin license.
 const char* BotVisionPlugin::GetLicense() { return "AGPL3.0"; }
 // Returns the version supplied by the build.
