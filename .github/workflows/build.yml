@@ -38,7 +38,7 @@ jobs:
       - name: Extract version
         id: ver
         run: |
-          version=$(sed -nE 's/.*GetVersion\(\) override \{ return "([^"]+)".*/\1/p' src/plugin.cpp | head -1)
+          version=$(sed -nE 's/^project\([^ ]+ VERSION ([0-9.]+) LANGUAGES .*/\1/p' CMakeLists.txt | head -1)
           test -n "$version" || { echo "::error::failed to extract the plugin version"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "BotVision $version"

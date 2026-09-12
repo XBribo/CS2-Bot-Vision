@@ -1,6 +1,6 @@
 // BotVision Metamod:Source plugin entry point
 
-#include <ISmmPlugin.h>
+#include "plugin.h"
 #include <ISmmPluginExt.h>
 
 #include <cstdio>
@@ -18,49 +18,14 @@
 #include "common/memory.h"
 #include "common/platform.h"
 
-class BotVisionPlugin : public ISmmPlugin
-{
-  public:
-    // Loads interfaces and installs all BotVision modules
-    bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
+#define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
+#define BUILD_TIMESTAMP __DATE__ " " __TIME__
 
-    // Removes all BotVision modules and console state
-    bool Unload(char* error, size_t maxlen) override;
+PLUGIN_EXPOSE(cs2bv::BotVisionPlugin, cs2bv::g_plugin);
 
-    // Accepts plugin pause requests
-    bool Pause(char* /*error*/, size_t /*maxlen*/) override { return true; }
+namespace cs2bv {
 
-    // Accepts plugin unpause requests
-    bool Unpause(char* /*error*/, size_t /*maxlen*/) override { return true; }
-
-    // Returns plugin author metadata
-    const char* GetAuthor() override { return "XBribo(๑•.•๑)"; }
-
-    // Returns plugin name metadata
-    const char* GetName() override { return "BotVision"; }
-
-    // Returns plugin description metadata
-    const char* GetDescription() override { return "Volumetric smoke bots."; }
-
-    // Returns plugin URL metadata
-    const char* GetURL() override { return ""; }
-
-    // Returns plugin license metadata
-    const char* GetLicense() override { return "AGPL3.0"; }
-
-    // Returns plugin version metadata
-    const char* GetVersion() override { return "0.2.6"; }
-
-    // Returns plugin build date metadata
-    const char* GetDate() override { return __DATE__; }
-
-    // Returns plugin log tag metadata
-    const char* GetLogTag() override { return "BV"; }
-};
-
-BotVisionPlugin g_botVisionPlugin; // NOLINT(misc-use-internal-linkage)
-PLUGIN_EXPOSE(BotVisionPlugin, // NOLINT(misc-use-internal-linkage,misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
-              g_botVisionPlugin);
+BotVisionPlugin g_plugin;
 
 namespace {
 // Resolves gamedata.json beside the plugin directory
@@ -149,3 +114,26 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     Msg("%s", "[BotVision] plugin unloaded\n");
     return true;
 }
+
+// Accepts a plugin pause request.
+bool BotVisionPlugin::Pause(char*, size_t) { return true; }
+// Accepts a plugin resume request.
+bool BotVisionPlugin::Unpause(char*, size_t) { return true; }
+// Returns plugin author metadata.
+const char* BotVisionPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
+// Returns the plugin name.
+const char* BotVisionPlugin::GetName() { return "BotVision"; }
+// Returns the plugin description.
+const char* BotVisionPlugin::GetDescription() { return "Volumetric smoke bots."; }
+// Returns the plugin project URL.
+const char* BotVisionPlugin::GetURL() { return ""; }
+// Returns the plugin license.
+const char* BotVisionPlugin::GetLicense() { return "AGPL3.0"; }
+// Returns the version supplied by the build.
+const char* BotVisionPlugin::GetVersion() { return VERSION_STRING; }
+// Returns the compilation date and time.
+const char* BotVisionPlugin::GetDate() { return BUILD_TIMESTAMP; }
+// Returns the plugin log tag.
+const char* BotVisionPlugin::GetLogTag() { return "BV"; }
+
+} // namespace cs2bv
