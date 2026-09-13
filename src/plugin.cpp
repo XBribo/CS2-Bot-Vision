@@ -16,6 +16,7 @@
 
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
+#include "core/gameconfig.h"
 #include "utils/memory.h"
 #include "utils/platform.h"
 
@@ -33,14 +34,23 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 {
     PLUGIN_SAVEVARS();
 
+    if (!log::Init(ismm->GetBaseDir(), error, maxlen)) return false;
+
     if (!KHook::__exported__khook)
     {
         std::snprintf(error, maxlen, "Metamod with KHook support is required");
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
         return false;
     }
 
 #ifndef _WIN32
-    if (!cs2bv::memory::Initialize(error, maxlen)) return false;
+    if (!cs2bv::memory::Initialize(error, maxlen))
+    {
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
+        return false;
+    }
 #endif
 
     cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
@@ -54,6 +64,8 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (!g_pCVar)
     {
         std::snprintf(error, maxlen, "Failed to get ICvar (%s)", CVAR_INTERFACE_VERSION);
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
         return false;
     }
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
@@ -62,18 +74,24 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (!serverIface)
     {
         std::snprintf(error, maxlen, "Failed to get IServerGameDLL");
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
         return false;
     }
 
-    std::string gamedataPath = ComputeGamedataPath();
+    std::string gamedataPath = cs2bv::gameconfig::ComputePath();
     if (gamedataPath.empty())
     {
         std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
         return false;
     }
 
     if (!cs2bv::bot_vision::Install(gamedataPath, serverIface, error, maxlen))
     {
+        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        log::Close();
         return false;
     }
 
@@ -97,6 +115,7 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     cs2bv::commands::g_engine = nullptr;
     cs2bv::bot_vision::SetEngine(nullptr);
     BV_LOG_INFO("%s", "[BotVision] plugin unloaded\n");
+    log::Close();
     return true;
 }
 

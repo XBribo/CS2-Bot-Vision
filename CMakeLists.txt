@@ -136,6 +136,20 @@ if(NOT EXISTS "${MMS}/third_party/khook/include/khook.hpp")
     message(FATAL_ERROR "Metamod with KHook is required; initialize its recursive submodules.")
 endif()
 
+include(FetchContent)
+FetchContent_Declare(spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.17.0
+    GIT_SHALLOW TRUE
+)
+set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(spdlog)
+set_target_properties(spdlog PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
     ${HL2SDK}/tier1/keyvalues3.cpp
@@ -145,19 +159,24 @@ set(SDK_SOURCES
 add_library(
     BotVision SHARED
     src/plugin.cpp
-    src/BotVision/BotVision.cpp
-    src/SmokeVision/SmokeVision.cpp
-    src/HeVision/HeVision.cpp
-    src/BulletVision/BulletVision.cpp
-    src/common/commands.cpp
-    src/common/game_time.cpp
-    src/common/memory.cpp
-    src/common/platform.cpp
-    src/common/schema_resolver.cpp
-    src/common/sig_scan.cpp
+    src/features/vision/BotVision.cpp
+    src/features/smoke/SmokeVision.cpp
+    src/features/he/HeVision.cpp
+    src/features/bullet/BulletVision.cpp
+    src/core/commands.cpp
+    src/core/config.cpp
+    src/core/game_time.cpp
+    src/core/gameconfig.cpp
+    src/core/log.cpp
+    src/core/memory_module.cpp
+    src/core/cs2_sdk/schema.cpp
+    src/utils/memory.cpp
+    src/utils/platform.cpp
     ${PROTO_SRCS}
     ${SDK_SOURCES}
 )
+
+target_link_libraries(BotVision PRIVATE spdlog::spdlog)
 
 if(ENABLE_FORMAT_CHECK)
     add_dependencies(BotVision format-check)
@@ -167,11 +186,8 @@ target_include_directories(
     BotVision
     PRIVATE
     src
-    src/BotVision
-    src/SmokeVision
-    src/HeVision
-    src/BulletVision
-    src/common
+    src/core
+    src/utils
     ${CMAKE_SOURCE_DIR}/libraries
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src

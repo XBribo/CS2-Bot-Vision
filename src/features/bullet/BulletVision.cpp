@@ -14,6 +14,7 @@
 
 #include <entity2/entityinstance.h>
 #include <entityhandle.h>
+#include <bspflags.h>
 #include <const.h>
 #include <gametrace.h>
 #include <mathlib/vector.h>
@@ -24,6 +25,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cinttypes>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -87,7 +89,7 @@ using PelletTraceHook = hooks::NativeHook<int64_t,
                                           int,
                                           void*,
                                           int64_t>;
-using TraceShapeFn = bool(CS2BV_FASTCALL*)(
+using TraceShapeFn = void(CS2BV_FASTCALL*)(
     const void* self, const Ray_t& ray, const Vector& start, const Vector& end, CTraceFilter* filter, CGameTrace* trace);
 using GetSlotFn = void*(CS2BV_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
 
@@ -110,6 +112,12 @@ struct PelletFrame
     int64_t angles;
     NativeTraceVector* results;
     int firstResultIndex;
+    bool captureRequested = false;
+    bool inputsReady = false;
+    float source[3]{};
+    float shotAngles[3]{};
+    float spreadX = 0.0F;
+    float spreadY = 0.0F;
 };
 thread_local std::vector<PelletFrame> g_pelletFrames;
 void** g_navPhysicsVtable = nullptr;
@@ -131,6 +139,12 @@ std::atomic<int> g_lastWeaponShotgun{ 0 };
 std::atomic<int64_t> g_bulletCount{ 0 };
 std::atomic<int64_t> g_nativeResultCount{ 0 };
 std::atomic<int64_t> g_missingResultCount{ 0 };
+std::atomic<int64_t> g_nullResultCount{ 0 };
+std::atomic<int64_t> g_skippedModeCount{ 0 };
+std::atomic<int64_t> g_skippedNoSmokeCount{ 0 };
+std::atomic<int64_t> g_fallbackCount{ 0 };
+std::atomic<int64_t> g_fallbackHits{ 0 };
+std::atomic<int64_t> g_fallbackFailures{ 0 };
 std::atomic<int64_t> g_heTraceAttempts{ 0 };
 std::atomic<int64_t> g_heTraceHits{ 0 };
 std::mutex g_lastBulletMutex;
@@ -138,8 +152,6 @@ float g_lastBulletSource[3] = { 0.0F, 0.0F, 0.0F };
 float g_lastBulletAngles[3] = { 0.0F, 0.0F, 0.0F };
 float g_lastBulletDirection[3] = { 0.0F, 0.0F, 0.0F };
 
-static_assert(offsetof(CGameTrace, m_vStartPos) == kNativeTraceStartOffset, "CGameTrace start offset changed");
-static_assert(offsetof(CGameTrace, m_vEndPos) == kNativeTraceEndOffset, "CGameTrace end offset changed");
 static_assert(offsetof(NativeTraceVector, data) == 0x10, "native trace vector ABI changed");
 
 // Mixes a pointer for fixed-size cache indexing
@@ -264,7 +276,83 @@ int CachedActiveWeaponDefinition(void* shooter)
     return definitionIndex;
 }
 
-// Saves the result-vector boundary before native tracing appends any hits.
+// Validates and normalizes one captured pellet segment.
+bool NormalizePellet(const float (&source)[3], const float (&end)[3], float (&direction)[3])
+{
+    for (int index = 0; index < 3; ++index)
+    {
+        if (!std::isfinite(source[index]) || !std::isfinite(end[index])) return false;
+        direction[index] = end[index] - source[index];
+    }
+    const float length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+    if (!std::isfinite(length) || length <= 1e-4F) return false;
+    for (float& component : direction)
+        component /= length;
+    return true;
+}
+
+// Reads the first trace appended by the native pellet call.
+bool ReadNativePellet(const PelletFrame& frame, float (&source)[3], float (&end)[3], float (&direction)[3])
+{
+    if (frame.firstResultIndex < 0) return false;
+    NativeTraceVector results{};
+    if (!memory::Read(frame.results, 0, results, memory::FailureDomain::Bullet) || !results.data ||
+        results.count <= frame.firstResultIndex || results.count > results.capacity)
+        return false;
+    const unsigned char* trace = results.data + static_cast<size_t>(frame.firstResultIndex) * kNativeGameTraceStride;
+    return memory::Read(trace, kNativeTraceStartOffset, source, memory::FailureDomain::Bullet) &&
+           memory::Read(trace, kNativeTraceEndOffset, end, memory::FailureDomain::Bullet) && NormalizePellet(source, end, direction);
+}
+
+// Reconstructs the pellet spread and traces its first collision without RayTrace.
+bool TraceFallbackPellet(const PelletFrame& frame, void* shooter, float (&source)[3], float (&end)[3], float (&direction)[3])
+{
+    if (!frame.inputsReady || !g_traceShape || !g_navPhysicsVtable) return false;
+    for (int index = 0; index < 3; ++index)
+    {
+        if (!std::isfinite(frame.source[index]) || !std::isfinite(frame.shotAngles[index])) return false;
+        source[index] = frame.source[index];
+    }
+    if (!std::isfinite(frame.spreadX) || !std::isfinite(frame.spreadY)) return false;
+    const float pitch = frame.shotAngles[0] * 0.01745329252F;
+    const float yaw = frame.shotAngles[1] * 0.01745329252F;
+    const float roll = frame.shotAngles[2] * 0.01745329252F;
+    const float sp = std::sin(pitch), cp = std::cos(pitch);
+    const float sy = std::sin(yaw), cy = std::cos(yaw);
+    const float sr = std::sin(roll), cr = std::cos(roll);
+    const float forward[3] = { cp * cy, cp * sy, -sp };
+    const float right[3] = { -sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp };
+    const float up[3] = { cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp };
+    float lengthSquared = 0.0F;
+    for (int index = 0; index < 3; ++index)
+    {
+        direction[index] = forward[index] - right[index] * frame.spreadX + up[index] * frame.spreadY;
+        lengthSquared += direction[index] * direction[index];
+    }
+    const float length = std::sqrt(lengthSquared);
+    if (!std::isfinite(length) || length <= 1e-4F) return false;
+    for (int index = 0; index < 3; ++index)
+        end[index] = source[index] + direction[index] * (8192.0F / length);
+
+    Ray_t ray;
+    const Vector start(source[0], source[1], source[2]);
+    const Vector fullEnd(end[0], end[1], end[2]);
+    CTraceFilter filter(MASK_SHOT, COLLISION_GROUP_DEFAULT, true);
+    filter.SetPassEntity1(static_cast<CEntityInstance*>(shooter));
+    CGameTrace trace{};
+    g_traceShape(&g_navPhysicsVtable, ray, start, fullEnd, &filter, &trace);
+    if (!std::isfinite(trace.m_flFraction) || trace.m_flFraction < 0.0F || trace.m_flFraction > 1.0F) return false;
+    if (trace.DidHit())
+    {
+        end[0] = trace.m_vEndPos.x;
+        end[1] = trace.m_vEndPos.y;
+        end[2] = trace.m_vEndPos.z;
+        g_fallbackHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    return NormalizePellet(source, end, direction);
+}
+
+// Saves inputs and the result-vector boundary before native tracing.
 KHook::Return<int64_t> PelletTracePre(int64_t a1,
                                       void* a2,
                                       int64_t a3,
@@ -287,9 +375,27 @@ KHook::Return<int64_t> PelletTracePre(int64_t a1,
                                       int64_t a20) noexcept
 {
     g_bulletCount.fetch_add(1, std::memory_order_relaxed);
-    const bool captureRequested = GetHolesEnabled() && smoke_vision::IsVolumeMode() && smoke_vision::HasSmokeProjectiles() && a12;
-    const int firstResultIndex = captureRequested && a12->count >= 0 && a12->count <= a12->capacity ? a12->count : -1;
-    g_pelletFrames.push_back({ a1, a3, a12, firstResultIndex });
+    PelletFrame frame{ a1, a3, a12, -1 };
+    if (GetHolesEnabled())
+    {
+        if (!smoke_vision::IsVolumeMode()) g_skippedModeCount.fetch_add(1, std::memory_order_relaxed);
+        else if (!smoke_vision::HasSmokeProjectiles())
+            g_skippedNoSmokeCount.fetch_add(1, std::memory_order_relaxed);
+        else
+            frame.captureRequested = true;
+    }
+    if (frame.captureRequested)
+    {
+        NativeTraceVector results{};
+        if (!a12) g_nullResultCount.fetch_add(1, std::memory_order_relaxed);
+        else if (memory::Read(a12, 0, results, memory::FailureDomain::Bullet) && results.count >= 0 && results.count <= results.capacity)
+            frame.firstResultIndex = results.count;
+        frame.inputsReady = memory::Read(a2, 0, frame.source, memory::FailureDomain::Bullet) &&
+                            memory::Read(reinterpret_cast<const void*>(a3), 0, frame.shotAngles, memory::FailureDomain::Bullet);
+        frame.spreadX = a13;
+        frame.spreadY = a14;
+    }
+    g_pelletFrames.push_back(frame);
     return { KHook::Action::Ignore };
 }
 
@@ -319,42 +425,7 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
     g_pelletFrames.pop_back();
     a1 = frame.shooter;
     a3 = frame.angles;
-    a12 = frame.results;
-    const int firstResultIndex = frame.firstResultIndex;
-    if (firstResultIndex < 0) return { KHook::Action::Ignore };
-
-    if (!a12->data || a12->count <= firstResultIndex || a12->count > a12->capacity)
-    {
-        g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return { KHook::Action::Ignore };
-    }
-
-    const unsigned char* nativeTrace = a12->data + (static_cast<size_t>(firstResultIndex) * kNativeGameTraceStride);
-    float nativeStart[3]{};
-    float nativeEnd[3]{};
-    if (!memory::Read(nativeTrace, kNativeTraceStartOffset, nativeStart, memory::FailureDomain::Bullet) ||
-        !memory::Read(nativeTrace, kNativeTraceEndOffset, nativeEnd, memory::FailureDomain::Bullet))
-    {
-        g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return { KHook::Action::Ignore };
-    }
-
-    float sourceValues[3] = { nativeStart[0], nativeStart[1], nativeStart[2] };
-    float traceEnd[3] = { nativeEnd[0], nativeEnd[1], nativeEnd[2] };
-    float direction[3] = { traceEnd[0] - sourceValues[0], traceEnd[1] - sourceValues[1], traceEnd[2] - sourceValues[2] };
-    const float length = std::sqrt((direction[0] * direction[0]) + (direction[1] * direction[1]) + (direction[2] * direction[2]));
-    if (!std::isfinite(sourceValues[0]) || !std::isfinite(sourceValues[1]) || !std::isfinite(sourceValues[2]) ||
-        !std::isfinite(traceEnd[0]) || !std::isfinite(traceEnd[1]) || !std::isfinite(traceEnd[2]) || length <= 1e-4F)
-    {
-        g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return { KHook::Action::Ignore };
-    }
-    for (float& component : direction)
-        component /= length;
-    g_nativeResultCount.fetch_add(1, std::memory_order_relaxed);
-
-    if (smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, traceEnd) <= 0.0F)
-        return { KHook::Action::Ignore };
+    if (!frame.captureRequested) return { KHook::Action::Ignore };
 
     void* shooter = nullptr;
     if (a1)
@@ -362,6 +433,23 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
         const void* shooterAddress = reinterpret_cast<const void*>(a1); // NOLINT(performance-no-int-to-ptr)
         if (!memory::Read(shooterAddress, 56, shooter, memory::FailureDomain::Bullet)) shooter = nullptr;
     }
+
+    float sourceValues[3]{};
+    float traceEnd[3]{};
+    float direction[3]{};
+    if (ReadNativePellet(frame, sourceValues, traceEnd, direction)) g_nativeResultCount.fetch_add(1, std::memory_order_relaxed);
+    else
+    {
+        g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
+        g_fallbackCount.fetch_add(1, std::memory_order_relaxed);
+        if (!TraceFallbackPellet(frame, shooter, sourceValues, traceEnd, direction))
+        {
+            g_fallbackFailures.fetch_add(1, std::memory_order_relaxed);
+            return { KHook::Action::Ignore };
+        }
+    }
+    if (smoke_vision::DensityFunctionReady() && smoke_vision::DensityInLine(sourceValues, traceEnd) <= 0.0F)
+        return { KHook::Action::Ignore };
 
     const int definitionIndex = CachedActiveWeaponDefinition(shooter);
     const bool shotgun = IsShotgunDefinition(definitionIndex);
@@ -393,6 +481,16 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 // Resolves offsets and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
 {
+    // Checks SDK member offsets on a real object without non-standard offsetof.
+    const CGameTrace layoutProbe;
+    const auto traceAddress = reinterpret_cast<uintptr_t>(&layoutProbe);
+    if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kNativeTraceStartOffset ||
+        reinterpret_cast<uintptr_t>(&layoutProbe.m_vEndPos) - traceAddress != kNativeTraceEndOffset)
+    {
+        BV_LOG_ERROR("[BOTVISION] error: CGameTrace layout changed; bullet capture and HE traces disabled\n");
+        return false;
+    }
+
     char traceError[256] = { 0 };
     g_navPhysicsVtable = modules::ResolveVirtualTable(serverModule, "CNavPhysicsInterface", traceError, sizeof(traceError));
     const int traceShapeOffset = gameconfig::ResolveOffset(gamedata, kTraceShapeName, -1);
@@ -408,7 +506,8 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
         const char* reason = traceShapeOffset < 0 ? "gamedata offset unavailable" : traceError;
         if (reason[0] == '\0') reason = "vtable slot is not executable";
         char warning[384];
-        std::snprintf(warning, sizeof(warning), "[BotVision] native HE trace unavailable (%s); HE smoke holes disabled\n", reason);
+        std::snprintf(warning, sizeof(warning), "[BotVision] native trace unavailable (%s); bullet fallback and HE smoke holes disabled\n",
+                      reason);
         BV_LOG_WARN("%s", warning);
     }
 
@@ -702,11 +801,17 @@ const char* GetLastBulletInfo()
 // Formats native trace and bullet capture diagnostics
 const char* GetDiagnostics()
 {
-    static char buffer[224];
-    std::snprintf(buffer, sizeof(buffer), "nativeTrace=%s enabled=%d autolist=%s results=%lld missing=%lld heAttempts=%lld heHits=%lld",
+    static char buffer[512];
+    std::snprintf(buffer, sizeof(buffer),
+                  "nativeTrace=%s enabled=%d autolist=%s results=%" PRId64 " missing=%" PRId64 " nullResults=%" PRId64
+                  " skippedMode=%" PRId64 " skippedNoSmoke=%" PRId64 " fallback=%" PRId64 " fallbackHits=%" PRId64
+                  " fallbackFailures=%" PRId64 " heAttempts=%" PRId64 " heHits=%" PRId64,
                   g_traceShape ? "OK" : "NULL", g_holesEnabled.load(std::memory_order_relaxed),
                   smoke_vision::AutoListReady() ? "set" : "NULL", g_nativeResultCount.load(std::memory_order_relaxed),
-                  g_missingResultCount.load(std::memory_order_relaxed), g_heTraceAttempts.load(std::memory_order_relaxed),
+                  g_missingResultCount.load(std::memory_order_relaxed), g_nullResultCount.load(std::memory_order_relaxed),
+                  g_skippedModeCount.load(std::memory_order_relaxed), g_skippedNoSmokeCount.load(std::memory_order_relaxed),
+                  g_fallbackCount.load(std::memory_order_relaxed), g_fallbackHits.load(std::memory_order_relaxed),
+                  g_fallbackFailures.load(std::memory_order_relaxed), g_heTraceAttempts.load(std::memory_order_relaxed),
                   g_heTraceHits.load(std::memory_order_relaxed));
     return buffer;
 }
