@@ -172,7 +172,7 @@ target_include_directories(
     src/HeVision
     src/BulletVision
     src/common
-    ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_SOURCE_DIR}/libraries
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src
     ${MMS}/core ${MMS}/third_party/khook/include ${MMS}/core/sourcemm
