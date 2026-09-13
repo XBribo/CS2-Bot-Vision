@@ -39,7 +39,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (!KHook::__exported__khook)
     {
         std::snprintf(error, maxlen, "Metamod with KHook support is required");
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
@@ -47,7 +47,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 #ifndef _WIN32
     if (!cs2bv::memory::Initialize(error, maxlen))
     {
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
@@ -56,7 +56,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bv::commands::g_engine)
     {
-        BV_LOG_WARN("%s", "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
+        BV_LOG_WARN("IVEngineServer2 unavailable; commands print to server console only");
     }
 
     // Wires g_pCVar and registers every CON_COMMAND_F
@@ -64,7 +64,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (!g_pCVar)
     {
         std::snprintf(error, maxlen, "Failed to get ICvar (%s)", CVAR_INTERFACE_VERSION);
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
@@ -74,7 +74,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (!serverIface)
     {
         std::snprintf(error, maxlen, "Failed to get IServerGameDLL");
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
@@ -83,14 +83,14 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (gamedataPath.empty())
     {
         std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
 
     if (!cs2bv::bot_vision::Install(gamedataPath, serverIface, error, maxlen))
     {
-        BV_LOG_ERROR("[BOTVISION] error: %s\n", error);
+        BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
     }
@@ -98,10 +98,8 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     cs2bv::bot_vision::SetEngine(cs2bv::commands::g_engine);
 
     cs2bv::commands::Register();
-    char message[96];
-    std::snprintf(message, sizeof(message), "[BotVision] loaded successfully (density threshold %.3f)\n",
-                  cs2bv::bot_vision::GetDensityThreshold());
-    BV_LOG_INFO("%s", message);
+    BV_LOG_INFO("Loaded %s", GetVersion());
+    BV_LOG_DEBUG("Density threshold %.3f", cs2bv::bot_vision::GetDensityThreshold());
     return true;
 }
 
@@ -114,7 +112,7 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     g_pCVar = nullptr;
     cs2bv::commands::g_engine = nullptr;
     cs2bv::bot_vision::SetEngine(nullptr);
-    BV_LOG_INFO("%s", "[BotVision] plugin unloaded\n");
+    BV_LOG_INFO("Unloaded");
     log::Close();
     return true;
 }

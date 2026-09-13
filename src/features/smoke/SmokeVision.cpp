@@ -93,7 +93,7 @@ float AdjustClientDensity(const float* from, const float* to, float density)
     return he_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
 }
 
-// Reports an install error to both the debug sink and plugin loader
+// Returns an install error for the plugin loader to log once.
 void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
     char buffer[512];
@@ -102,9 +102,6 @@ void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLI
     std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
 
-    BV_LOG_INFO("%s", "[BotVision] ");
-    BV_LOG_INFO("%s", buffer);
-    BV_LOG_INFO("%s", "\n");
     if (error && maxLength > 0) std::snprintf(error, maxLength, "%s", buffer);
 }
 
@@ -212,7 +209,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     if (signature.empty())
     {
         g_hookedStatus = "sig_empty";
-        BV_LOG_WARN("%s", "[BotVision] AutoList entry/sig missing; hook disabled\n");
+        BV_LOG_WARN("AutoList entry/sig missing; hook disabled");
         return;
     }
 
@@ -223,7 +220,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     if (!modules::ParseSigString(signature, pattern, wildcards))
     {
         g_hookedStatus = "sig_parse_failed";
-        BV_LOG_WARN("%s", "[BotVision] AutoList sig parse failed\n");
+        BV_LOG_WARN("AutoList sig parse failed");
         return;
     }
 
@@ -231,7 +228,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     if (!site)
     {
         g_hookedStatus = "sig_not_found";
-        BV_LOG_INFO("%s", "[BotVision] AutoList sig not found\n");
+        BV_LOG_WARN("AutoList sig not found");
         return;
     }
 
@@ -239,7 +236,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     if (!target)
     {
         g_hookedStatus = "rel32_failed";
-        BV_LOG_WARN("%s", "[BotVision] AutoList rel32 resolve failed\n");
+        BV_LOG_WARN("AutoList rel32 resolve failed");
         return;
     }
 
@@ -449,9 +446,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
     else
     {
-        char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] %s; mode 0 falls back to vanilla-smoke\n", densityError);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("%s; mode 0 falls back to vanilla-smoke", densityError);
     }
 
     char visibleError[256] = { 0 };
@@ -467,13 +462,11 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     else
     {
         g_visiblePosHook.Remove();
-        char warning[320];
         const char* reason = visibleError;
         if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "required offset unavailable";
         else if (visibleTarget)
             reason = "KHook error";
-        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("IsVisiblePos hook failed (%s); per-bot density disabled", reason);
     }
 
     char visiblePlayerError[256] = { 0 };
@@ -489,13 +482,11 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     else
     {
         g_visiblePlayerHook.Remove();
-        char warning[320];
         const char* reason = visiblePlayerError;
         if (g_controllerHandleOffset < 0) reason = "required offset unavailable";
         else if (visiblePlayerTarget)
             reason = "KHook error";
-        std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("IsVisiblePlayer hook failed (%s); target reveal disabled", reason);
     }
     return true;
 }

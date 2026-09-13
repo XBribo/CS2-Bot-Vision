@@ -487,7 +487,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kNativeTraceStartOffset ||
         reinterpret_cast<uintptr_t>(&layoutProbe.m_vEndPos) - traceAddress != kNativeTraceEndOffset)
     {
-        BV_LOG_ERROR("[BOTVISION] error: CGameTrace layout changed; bullet capture and HE traces disabled\n");
+        BV_LOG_ERROR("CGameTrace layout changed; bullet capture and HE traces disabled");
         return false;
     }
 
@@ -505,10 +505,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
         g_navPhysicsVtable = nullptr;
         const char* reason = traceShapeOffset < 0 ? "gamedata offset unavailable" : traceError;
         if (reason[0] == '\0') reason = "vtable slot is not executable";
-        char warning[384];
-        std::snprintf(warning, sizeof(warning), "[BotVision] native trace unavailable (%s); bullet fallback and HE smoke holes disabled\n",
-                      reason);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("Native trace unavailable (%s); bullet fallback and HE smoke holes disabled", reason);
     }
 
     g_weaponServicesOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_pWeaponServices");
@@ -530,10 +527,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     else
     {
         g_pelletTraceHook.Remove();
-        char warning[320];
-        std::snprintf(warning, sizeof(warning), "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
-                      pelletTarget ? "KHook error" : pelletError);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("Pellet-trace hook failed (%s); bullet holes disabled", pelletTarget ? "KHook error" : pelletError);
     }
 
     char getSlotError[256] = { 0 };
@@ -546,10 +540,8 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
     else
     {
-        char warning[320];
         const char* reason = weaponOffsetsReady ? getSlotError : "weapon schema offset unavailable";
-        std::snprintf(warning, sizeof(warning), "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", reason);
-        BV_LOG_WARN("%s", warning);
+        BV_LOG_WARN("%s; shotgun radius disabled (all bullets use normal radius)", reason);
     }
     return installed;
 }

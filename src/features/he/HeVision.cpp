@@ -19,7 +19,6 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -114,7 +113,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     g_absOriginOffset = schema::GetFieldOffset("CGameSceneNode", "m_vecAbsOrigin");
     if (g_bodyComponentOffset < 0 || g_sceneNodeOffset < 0 || g_absOriginOffset < 0)
     {
-        BV_LOG_WARN("%s", "[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
+        BV_LOG_WARN("HE offsets unavailable from schema; HE holes disabled");
         g_listenerStatus = "schema=FAIL";
         return false;
     }
@@ -128,10 +127,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     g_detonateHook.Remove();
-    char message[320];
-    std::snprintf(message, sizeof(message), "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
-                  target ? "KHook error" : error);
-    BV_LOG_INFO("%s", message);
+    BV_LOG_WARN("HE detonate hook failed (%s); HE holes disabled", target ? "KHook error" : error);
     g_listenerStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
 }
@@ -157,10 +153,7 @@ void OnDetonate(float x, float y, float z)
         g_blasts.push_back({ .x = x, .y = y, .z = z, .startTime = time });
     }
 
-    char message[160];
-    std::snprintf(message, sizeof(message), "[BotVision] HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d\n", x, y, z, time,
-                  GetActiveCount());
-    BV_LOG_INFO("%s", message);
+    BV_LOG_DEBUG("HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d", x, y, z, time, GetActiveCount());
 }
 
 // Applies active HE records to native density inside each blast chord

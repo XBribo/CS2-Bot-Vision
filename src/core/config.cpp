@@ -3,7 +3,6 @@
 #include "features/vision/BotVision.h"
 #include <nlohmann/json.hpp>
 #include <cmath>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -35,9 +34,7 @@ nlohmann::json BuildDefaultConfig()
 // Reports one invalid startup setting
 void WarnInvalidSetting(const char* setting)
 {
-    char message[192];
-    std::snprintf(message, sizeof(message), "[BotVision] WARN: invalid config setting '%s'; using default\n", setting);
-    BV_LOG_INFO("%s", message);
+    BV_LOG_WARN("Invalid config setting '%s'; using default", setting);
 }
 
 // Applies one nonnegative fixed-point startup setting
@@ -145,7 +142,7 @@ void LoadStartupConfig(const std::string& gamedataPath)
         }
         else
         {
-            BV_LOG_WARN("%s", "[BotVision] WARN: config.json missing and could not be created; using defaults\n");
+            BV_LOG_WARN("config.json missing and could not be created; using defaults");
         }
         return;
     }
@@ -154,7 +151,7 @@ void LoadStartupConfig(const std::string& gamedataPath)
     const nlohmann::json config = nlohmann::json::parse(configText, nullptr, false);
     if (config.is_discarded() || !config.is_object())
     {
-        BV_LOG_WARN("%s", "[BotVision] WARN: config.json parse error; using defaults\n");
+        BV_LOG_WARN("config.json parse error; using defaults");
         return;
     }
     ApplyStartupConfig(config);

@@ -32,9 +32,6 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         {
             std::snprintf(error, maxLength, format, gamedataPath.c_str());
         }
-        char message[512];
-        std::snprintf(message, sizeof(message), "[BotVision] failed to read/parse gamedata.json at %s\n", gamedataPath.c_str());
-        BV_LOG_INFO("%s", message);
         return false;
     }
 
@@ -55,15 +52,12 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
         {
             std::snprintf(error, maxLength, "could not resolve CS2 server module from interface ptr=%p", serverInterface);
         }
-        char message[256];
-        std::snprintf(message, sizeof(message), "[BotVision] could not resolve CS2 server module from interface ptr=%p\n", serverInterface);
-        BV_LOG_INFO("%s", message);
         return false;
     }
 
     if (!schema::Init())
     {
-        BV_LOG_WARN("%s", "[BotVision] WARN: SchemaSystem unavailable; optional features disabled\n");
+        BV_LOG_WARN("SchemaSystem unavailable; optional features disabled");
     }
 
     if (!smoke_vision::Install(gamedata, serverModule, error, maxLength)) return false;
@@ -80,9 +74,7 @@ void Remove()
     he_vision::Remove();
     smoke_vision::Remove();
 
-    char message[160];
-    std::snprintf(message, sizeof(message), "[BotVision] removed: hits=%lld blocked=%lld\n", GetHitCount(), GetBlockedCount());
-    BV_LOG_INFO("%s", message);
+    BV_LOG_DEBUG("Removed: hits=%lld blocked=%lld", GetHitCount(), GetBlockedCount());
 }
 
 // Stores the engine interface for shared server time
