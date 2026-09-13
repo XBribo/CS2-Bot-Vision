@@ -1,4 +1,3 @@
-// Signature scanning and gamedata helpers
 
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
@@ -7,9 +6,8 @@
 #include <string>
 #include <vector>
 
-#include <nlohmann/json.hpp>
 
-namespace cs2bv::sig {
+namespace cs2bv::modules {
 struct ModuleSegment
 {
     unsigned char* base = nullptr;
@@ -26,12 +24,8 @@ struct ModuleInfo
     explicit operator bool() const { return base != nullptr && size != 0; }
 };
 
-// Read + parse gamedata.json into `out`. Returns false on open/parse error
-bool LoadGamedata(const char* path, nlohmann::json& out);
 
-std::string FindPlatformSig(const nlohmann::json& gamedata, const std::string& name);
 
-const char* PlatformName();
 
 bool ParseSigString(const std::string& sigStr, std::vector<uint8_t>& outBytes, std::vector<bool>& outWild);
 
@@ -54,8 +48,5 @@ void** ResolveVirtualTable(const ModuleInfo& module, const char* className, char
 // Checks whether an address belongs to executable image memory
 bool IsExecutableAddress(const void* address);
 
-void* ResolveSig(const nlohmann::json& gamedata, const ModuleInfo& module, const char* name, char* errorOut, size_t errorOutLen);
 
-// Read a platform offset from gamedata[name].offsets.<platform>; defVal if absent
-int ResolveOffset(const nlohmann::json& gamedata, const char* name, int defVal);
-} // namespace cs2bv::sig
+} // namespace cs2bv::modules

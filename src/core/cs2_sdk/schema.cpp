@@ -1,6 +1,6 @@
 // Runtime Source 2 schema field resolver
 
-#include "schema_resolver.h"
+#include "core/cs2_sdk/schema.h"
 
 #include <schemasystem/schemasystem.h>
 #include <schemasystem/schematypes.h>

@@ -1,5 +1,5 @@
 #include "commands.h"
-#include "BotVision/BotVision.h"
+#include "features/vision/BotVision.h"
 
 #include <tier0/dbg.h>
 #include <convar.h>

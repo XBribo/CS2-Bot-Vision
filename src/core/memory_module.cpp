@@ -1,8 +1,6 @@
-// Signature scanning and gamedata helpers
 //
-// Signature scanning + gamedata.json loader.
 
-#include "sig_scan.h"
+#include "core/memory_module.h"
 
 #ifdef _WIN32
 #include <Windows.h> // NOLINT(misc-include-cleaner)
@@ -24,13 +22,10 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
-#include <fstream>
-#include <ios>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
-namespace cs2bv::sig {
+namespace cs2bv::modules {
 namespace {
 // Returns the final component of a platform path
 const char* BaseName(const char* path)
@@ -268,43 +263,12 @@ int FindExecutableAddressCallback(dl_phdr_info* info, size_t, void* data)
 #endif
 } // namespace
 
-// Loads and parses a gamedata JSON object
-bool LoadGamedata(const char* path, nlohmann::json& out)
-{
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs.is_open()) return false;
-    try
-    {
-        out = nlohmann::json::parse(ifs);
-    }
-    catch (...)
-    {
-        return false;
-    }
-    return out.is_object();
-}
 
-// Returns the gamedata key for the current platform
-const char* PlatformName()
-{
-#ifdef _WIN32
-    return "windows";
-#else
-    return "linux";
-#endif
-}
+
+
 
 // Returns one platform-specific signature string
-std::string FindPlatformSig(const nlohmann::json& gamedata, const std::string& name)
-{
-    auto it = gamedata.find(name);
-    if (it == gamedata.end() || !it->is_object()) return "";
-    auto sigIt = it->find("signatures");
-    if (sigIt == it->end() || !sigIt->is_object()) return "";
-    auto platformIt = sigIt->find(PlatformName());
-    if (platformIt == sigIt->end() || !platformIt->is_string()) return "";
-    return platformIt->get<std::string>();
-}
+
 
 // Parses signature bytes and wildcard positions
 bool ParseSigString(const std::string& sigStr, std::vector<uint8_t>& outBytes, std::vector<bool>& outWild)
@@ -543,40 +507,7 @@ bool IsExecutableAddress(const void* address)
 #endif
 }
 
-// Resolves one named gamedata signature in a module
-void* ResolveSig(const nlohmann::json& gamedata, const ModuleInfo& module, const char* name, char* errorOut, size_t errorOutLen)
-{
-    std::string sig = FindPlatformSig(gamedata, name);
-    if (sig.empty())
-    {
-        SetError(errorOut, errorOutLen, "gamedata missing '%s.signatures.%s'", name, PlatformName());
-        return nullptr;
-    }
-    std::vector<uint8_t> bytes;
-    std::vector<bool> wild;
-    if (!ParseSigString(sig, bytes, wild))
-    {
-        SetError(errorOut, errorOutLen, "failed to parse '%s' sig: '%s'", name, sig.c_str());
-        return nullptr;
-    }
-    void* addr = FindPatternIn(module, bytes, wild);
-    if (!addr)
-    {
-        SetError(errorOut, errorOutLen, "sig '%s' not found in target module", name);
-        return nullptr;
-    }
-    return addr;
-}
 
-// Read gamedata[name].offsets.<platform>; defVal if entry/key missing or not integer
-int ResolveOffset(const nlohmann::json& gamedata, const char* name, int defVal)
-{
-    auto it = gamedata.find(name);
-    if (it == gamedata.end() || !it->is_object()) return defVal;
-    auto offIt = it->find("offsets");
-    if (offIt == it->end() || !offIt->is_object()) return defVal;
-    auto platIt = offIt->find(PlatformName());
-    if (platIt == offIt->end() || !platIt->is_number_integer()) return defVal;
-    return platIt->get<int>();
-}
-} // namespace cs2bv::sig
+
+
+} // namespace cs2bv::modules

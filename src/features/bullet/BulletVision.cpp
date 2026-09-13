@@ -1,14 +1,16 @@
+#include "core/log.h"
+#include "core/gameconfig.h"
 // Bullet trace capture and temporary smoke tunnels
 
 #include "BulletVision.h"
 
-#include "SmokeVision/SmokeVision.h"
+#include "features/smoke/SmokeVision.h"
 #include "game_time.h"
 #include "hooks.h"
 #include "memory.h"
 #include "platform.h"
-#include "schema_resolver.h"
-#include "sig_scan.h"
+#include "core/cs2_sdk/schema.h"
+#include "core/memory_module.h"
 
 #include <entity2/entityinstance.h>
 #include <entityhandle.h>
@@ -389,13 +391,13 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 } // namespace
 
 // Resolves offsets and installs optional bullet capture facilities
-bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
+bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
 {
     char traceError[256] = { 0 };
-    g_navPhysicsVtable = sig::ResolveVirtualTable(serverModule, "CNavPhysicsInterface", traceError, sizeof(traceError));
-    const int traceShapeOffset = sig::ResolveOffset(gamedata, kTraceShapeName, -1);
+    g_navPhysicsVtable = modules::ResolveVirtualTable(serverModule, "CNavPhysicsInterface", traceError, sizeof(traceError));
+    const int traceShapeOffset = gameconfig::ResolveOffset(gamedata, kTraceShapeName, -1);
     if (g_navPhysicsVtable && traceShapeOffset >= 0 && traceShapeOffset < 64 &&
-        sig::IsExecutableAddress(g_navPhysicsVtable[traceShapeOffset]))
+        modules::IsExecutableAddress(g_navPhysicsVtable[traceShapeOffset]))
     {
         g_traceShape = reinterpret_cast<TraceShapeFn>(g_navPhysicsVtable[traceShapeOffset]);
     }
@@ -407,7 +409,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         if (reason[0] == '\0') reason = "vtable slot is not executable";
         char warning[384];
         std::snprintf(warning, sizeof(warning), "[BotVision] native HE trace unavailable (%s); HE smoke holes disabled\n", reason);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
 
     g_weaponServicesOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_pWeaponServices");
@@ -420,7 +422,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
                                       : -1;
 
     char pelletError[256] = { 0 };
-    void* pelletTarget = sig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
+    void* pelletTarget = gameconfig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
     bool installed = false;
     if (pelletTarget && g_pelletTraceHook.Install(pelletTarget, &PelletTracePre, &HookedPelletTrace))
     {
@@ -432,13 +434,13 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         char warning[320];
         std::snprintf(warning, sizeof(warning), "[BotVision] pellet-trace hook failed (%s); bullet holes disabled\n",
                       pelletTarget ? "KHook error" : pelletError);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
 
     char getSlotError[256] = { 0 };
     const bool weaponOffsetsReady = g_weaponServicesOffset >= 0 && g_activeWeaponOffset >= 0 && g_itemDefinitionIndexOffset >= 0;
     void* getSlotTarget =
-        weaponOffsetsReady ? sig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
+        weaponOffsetsReady ? gameconfig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
     if (getSlotTarget)
     {
         g_getSlot = reinterpret_cast<GetSlotFn>(getSlotTarget);
@@ -448,7 +450,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         char warning[320];
         const char* reason = weaponOffsetsReady ? getSlotError : "weapon schema offset unavailable";
         std::snprintf(warning, sizeof(warning), "[BotVision] %s; shotgun radius disabled (all bullets use normal radius)\n", reason);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
     return installed;
 }

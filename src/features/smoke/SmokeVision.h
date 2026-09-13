@@ -2,7 +2,7 @@
 
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
-#include "sig_scan.h"
+#include "core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 
@@ -11,7 +11,7 @@
 
 namespace cs2bv::smoke_vision {
 // Installs the required smoke hook and optional per-bot hook
-bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule, char* error, size_t maxLength);
+bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule, char* error, size_t maxLength);
 
 // Removes all smoke visibility hooks
 void Remove();

@@ -1,3 +1,4 @@
+#include "core/log.h"
 // BotVision Metamod:Source plugin entry point
 
 #include "plugin.h"
@@ -13,10 +14,10 @@
 #include <tier0/dbg.h>
 #include <interfaces/interfaces.h>
 
-#include "BotVision/BotVision.h"
-#include "common/commands.h"
-#include "common/memory.h"
-#include "common/platform.h"
+#include "features/vision/BotVision.h"
+#include "core/commands.h"
+#include "utils/memory.h"
+#include "utils/platform.h"
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
 #define BUILD_TIMESTAMP __DATE__ " " __TIME__
@@ -26,22 +27,6 @@ PLUGIN_EXPOSE(cs2bv::BotVisionPlugin, cs2bv::g_plugin);
 namespace cs2bv {
 
 BotVisionPlugin g_plugin;
-
-namespace {
-// Resolves gamedata.json beside the plugin directory
-std::string ComputeGamedataPath()
-{
-    std::filesystem::path path(cs2bv::platform::SelfModulePath());
-    if (path.empty()) return "";
-
-    for (int i = 0; i < 3; ++i)
-    {
-        if (!path.has_parent_path()) return "";
-        path = path.parent_path();
-    }
-    return (path / "gamedata.json").string();
-}
-} // namespace
 
 // Loads engine interfaces and installs the coordinated modules
 bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool /*late*/)
@@ -61,7 +46,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bv::commands::g_engine)
     {
-        Msg("%s", "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
+        BV_LOG_WARN("%s", "[BotVision] WARN: IVEngineServer2 unavailable; commands print to server console only\n");
     }
 
     // Wires g_pCVar and registers every CON_COMMAND_F
@@ -98,7 +83,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     char message[96];
     std::snprintf(message, sizeof(message), "[BotVision] loaded successfully (density threshold %.3f)\n",
                   cs2bv::bot_vision::GetDensityThreshold());
-    Msg("%s", message);
+    BV_LOG_INFO("%s", message);
     return true;
 }
 
@@ -111,7 +96,7 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     g_pCVar = nullptr;
     cs2bv::commands::g_engine = nullptr;
     cs2bv::bot_vision::SetEngine(nullptr);
-    Msg("%s", "[BotVision] plugin unloaded\n");
+    BV_LOG_INFO("%s", "[BotVision] plugin unloaded\n");
     return true;
 }
 

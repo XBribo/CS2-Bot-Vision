@@ -1,14 +1,16 @@
+#include "core/log.h"
+#include "core/gameconfig.h"
 // Smoke visibility hooks and per-bot threshold state
 
 #include "SmokeVision.h"
 
-#include "BulletVision/BulletVision.h"
-#include "HeVision/HeVision.h"
+#include "features/bullet/BulletVision.h"
+#include "features/he/HeVision.h"
 #include "hooks.h"
 #include "memory.h"
 #include "platform.h"
-#include "schema_resolver.h"
-#include "sig_scan.h"
+#include "core/cs2_sdk/schema.h"
+#include "core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
@@ -100,9 +102,9 @@ void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLI
     std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
 
-    Msg("%s", "[BotVision] ");
-    Msg("%s", buffer);
-    Msg("%s", "\n");
+    BV_LOG_INFO("%s", "[BotVision] ");
+    BV_LOG_INFO("%s", buffer);
+    BV_LOG_INFO("%s", "\n");
     if (error && maxLength > 0) std::snprintf(error, maxLength, "%s", buffer);
 }
 
@@ -138,19 +140,19 @@ int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* ke
 
 // Resolves a signature already replaced by a rel32 detour
 void* ResolveWithDetourFallback(
-    const nlohmann::json& gamedata, const sig::ModuleInfo& module, const char* name, bool& usedFallback, char* error, size_t errorLength)
+    const nlohmann::json& gamedata, const modules::ModuleInfo& module, const char* name, bool& usedFallback, char* error, size_t errorLength)
 {
     usedFallback = false;
 
     char primaryError[256] = { 0 };
-    void* target = sig::ResolveSig(gamedata, module, name, primaryError, sizeof(primaryError));
+    void* target = gameconfig::ResolveSig(gamedata, module, name, primaryError, sizeof(primaryError));
     if (target) return target;
 
-    const std::string signature = sig::FindPlatformSig(gamedata, name);
+    const std::string signature = gameconfig::FindPlatformSig(gamedata, name);
     std::vector<uint8_t> pattern;
     std::vector<bool> wildcards;
     constexpr size_t kRel32JumpSize = 5;
-    if (signature.empty() || !sig::ParseSigString(signature, pattern, wildcards) || pattern.size() <= kRel32JumpSize)
+    if (signature.empty() || !modules::ParseSigString(signature, pattern, wildcards) || pattern.size() <= kRel32JumpSize)
     {
         if (error && errorLength > 0) std::snprintf(error, errorLength, "%s", primaryError);
         return nullptr;
@@ -159,7 +161,7 @@ void* ResolveWithDetourFallback(
     void* resolved = nullptr;
     size_t matchCount = 0;
     const size_t tailSize = pattern.size() - kRel32JumpSize;
-    for (const sig::ModuleSegment& segment : module.segments)
+    for (const modules::ModuleSegment& segment : module.segments)
     {
         if (!segment.base || segment.size < pattern.size()) continue;
 
@@ -204,13 +206,13 @@ void* ResolveWithDetourFallback(
 }
 
 // Resolves the engine smoke projectile auto-list head
-void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
+void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
 {
-    const std::string signature = sig::FindPlatformSig(gamedata, kAutoListName);
+    const std::string signature = gameconfig::FindPlatformSig(gamedata, kAutoListName);
     if (signature.empty())
     {
         g_hookedStatus = "sig_empty";
-        Msg("%s", "[BotVision] AutoList entry/sig missing; hook disabled\n");
+        BV_LOG_WARN("%s", "[BotVision] AutoList entry/sig missing; hook disabled\n");
         return;
     }
 
@@ -218,18 +220,18 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::ModuleInfo& 
     const int instructionLength = GamedataInt(gamedata, kAutoListName, "rel_size", 7);
     std::vector<uint8_t> pattern;
     std::vector<bool> wildcards;
-    if (!sig::ParseSigString(signature, pattern, wildcards))
+    if (!modules::ParseSigString(signature, pattern, wildcards))
     {
         g_hookedStatus = "sig_parse_failed";
-        Msg("%s", "[BotVision] AutoList sig parse failed\n");
+        BV_LOG_WARN("%s", "[BotVision] AutoList sig parse failed\n");
         return;
     }
 
-    void* site = sig::FindPatternIn(serverModule, pattern, wildcards);
+    void* site = modules::FindPatternIn(serverModule, pattern, wildcards);
     if (!site)
     {
         g_hookedStatus = "sig_not_found";
-        Msg("%s", "[BotVision] AutoList sig not found\n");
+        BV_LOG_INFO("%s", "[BotVision] AutoList sig not found\n");
         return;
     }
 
@@ -237,7 +239,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const sig::ModuleInfo& 
     if (!target)
     {
         g_hookedStatus = "rel32_failed";
-        Msg("%s", "[BotVision] AutoList rel32 resolve failed\n");
+        BV_LOG_WARN("%s", "[BotVision] AutoList rel32 resolve failed\n");
         return;
     }
 
@@ -410,7 +412,7 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
 } // namespace
 
 // Installs required and optional smoke hooks
-bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule, char* error, size_t maxLength)
+bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule, char* error, size_t maxLength)
 {
     for (int slot = 0; slot < kMaxBots; ++slot)
     {
@@ -422,10 +424,10 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     g_revealMask.store(0, std::memory_order_relaxed);
 
     g_controllerHandleOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_hController");
-    g_playerInBotOffset = sig::ResolveOffset(gamedata, "Bot::m_pPlayer", -1);
+    g_playerInBotOffset = gameconfig::ResolveOffset(gamedata, "Bot::m_pPlayer", -1);
 
     char signatureError[256] = { 0 };
-    void* target = sig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
+    void* target = gameconfig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
     if (!target)
     {
         ReportError(error, maxLength, "%s", signatureError);
@@ -440,7 +442,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     }
 
     char densityError[256] = { 0 };
-    void* densityTarget = sig::ResolveSig(gamedata, serverModule, kDensityFunctionName, densityError, sizeof(densityError));
+    void* densityTarget = gameconfig::ResolveSig(gamedata, serverModule, kDensityFunctionName, densityError, sizeof(densityError));
     if (densityTarget)
     {
         g_getSmokeDensityInLine = reinterpret_cast<GetSmokeDensityInLineFn>(densityTarget);
@@ -449,7 +451,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     {
         char warning[320];
         std::snprintf(warning, sizeof(warning), "[BotVision] %s; mode 0 falls back to vanilla-smoke\n", densityError);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
 
     char visibleError[256] = { 0 };
@@ -471,7 +473,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         else if (visibleTarget)
             reason = "KHook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePos hook failed (%s); per-bot density disabled\n", reason);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
 
     char visiblePlayerError[256] = { 0 };
@@ -493,7 +495,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
         else if (visiblePlayerTarget)
             reason = "KHook error";
         std::snprintf(warning, sizeof(warning), "[BotVision] IsVisiblePlayer hook failed (%s); target reveal disabled\n", reason);
-        Msg("%s", warning);
+        BV_LOG_WARN("%s", warning);
     }
     return true;
 }

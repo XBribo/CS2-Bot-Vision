@@ -1,14 +1,16 @@
+#include "core/log.h"
+#include "core/gameconfig.h"
 // HE grenade smoke-hole capture and state
 
 #include "HeVision.h"
 
-#include "SmokeVision/SmokeVision.h"
+#include "features/smoke/SmokeVision.h"
 #include "game_time.h"
 #include "hooks.h"
 #include "memory.h"
 #include "platform.h"
-#include "schema_resolver.h"
-#include "sig_scan.h"
+#include "core/cs2_sdk/schema.h"
+#include "core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
@@ -105,20 +107,20 @@ KHook::Return<int64_t> HookedDetonate(void* self) noexcept
 } // namespace
 
 // Resolves offsets and installs the optional HE detonation hook
-bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule)
+bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
 {
     g_bodyComponentOffset = schema::GetFieldOffset("CBaseEntity", "m_CBodyComponent");
     g_sceneNodeOffset = schema::GetFieldOffset("CBodyComponent", "m_pSceneNode");
     g_absOriginOffset = schema::GetFieldOffset("CGameSceneNode", "m_vecAbsOrigin");
     if (g_bodyComponentOffset < 0 || g_sceneNodeOffset < 0 || g_absOriginOffset < 0)
     {
-        Msg("%s", "[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
+        BV_LOG_WARN("%s", "[BotVision] HE offsets unavailable from schema; HE holes disabled\n");
         g_listenerStatus = "schema=FAIL";
         return false;
     }
 
     char error[256] = { 0 };
-    void* target = sig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
+    void* target = gameconfig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
     if (target && g_detonateHook.Install(target, &HookedDetonate))
     {
         g_listenerStatus = "hook=ok";
@@ -129,7 +131,7 @@ bool Install(const nlohmann::json& gamedata, const sig::ModuleInfo& serverModule
     char message[320];
     std::snprintf(message, sizeof(message), "[BotVision] HE detonate hook failed (%s); HE holes disabled\n",
                   target ? "KHook error" : error);
-    Msg("%s", message);
+    BV_LOG_INFO("%s", message);
     g_listenerStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
 }
@@ -158,7 +160,7 @@ void OnDetonate(float x, float y, float z)
     char message[160];
     std::snprintf(message, sizeof(message), "[BotVision] HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d\n", x, y, z, time,
                   GetActiveCount());
-    Msg("%s", message);
+    BV_LOG_INFO("%s", message);
 }
 
 // Applies active HE records to native density inside each blast chord
