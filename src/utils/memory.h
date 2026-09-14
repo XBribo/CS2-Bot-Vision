@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 namespace cs2bv::memory {
 enum class FailureDomain : uint8_t
@@ -20,6 +21,9 @@ enum class FailureDomain : uint8_t
 
 // Checks whether a complete address range is readable
 bool IsReadable(const void* address, size_t size);
+
+// Copies two independent ranges; failure may partially fill the destinations.
+bool ReadPairBytes(const void* first, void* firstOut, size_t firstSize, const void* second, void* secondOut, size_t secondSize);
 
 #ifndef _WIN32
 // Verifies that kernel-assisted reads are available before installing hooks
@@ -68,6 +72,33 @@ template <typename T> bool Read(const void* base, size_t offset, T& out, Failure
 #else
     std::memcpy(static_cast<void*>(&out), buffer, sizeof(T));
 #endif
+    return true;
+}
+
+// Publishes both fields only after the complete pair has been read successfully.
+template <typename T, typename U>
+bool ReadPair(const void* firstBase, size_t firstOffset, T& firstOut,
+              const void* secondBase, size_t secondOffset, U& secondOut, FailureDomain domain)
+{
+    static_assert(std::is_trivially_copyable_v<T> && std::is_trivially_copyable_v<U>);
+    const auto first = reinterpret_cast<uintptr_t>(firstBase);
+    const auto second = reinterpret_cast<uintptr_t>(secondBase);
+    if (!firstBase || !secondBase || firstOffset > UINTPTR_MAX - first || secondOffset > UINTPTR_MAX - second)
+    {
+        RecordFailure(domain);
+        return false;
+    }
+
+    unsigned char firstBuffer[sizeof(T)];
+    unsigned char secondBuffer[sizeof(U)];
+    if (!ReadPairBytes(reinterpret_cast<const void*>(first + firstOffset), firstBuffer, sizeof(T),
+                       reinterpret_cast<const void*>(second + secondOffset), secondBuffer, sizeof(U)))
+    {
+        RecordFailure(domain);
+        return false;
+    }
+    std::memcpy(static_cast<void*>(&firstOut), firstBuffer, sizeof(T));
+    std::memcpy(static_cast<void*>(&secondOut), secondBuffer, sizeof(U));
     return true;
 }
 } // namespace cs2bv::memory

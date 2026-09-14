@@ -387,7 +387,7 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
 
     float fromValues[3]{};
     float toValues[3]{};
-    if (!memory::Read(from, 0, fromValues, memory::FailureDomain::Smoke) || !memory::Read(to, 0, toValues, memory::FailureDomain::Smoke))
+    if (!memory::ReadPair(from, 0, fromValues, to, 0, toValues, memory::FailureDomain::Smoke))
     {
         return { KHook::Action::Ignore };
     }

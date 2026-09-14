@@ -285,8 +285,8 @@ KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float star
 
     PelletFrame& frame = g_pelletFrames.back();
     if (!frame.captureRequested || frame.traceReady) return { KHook::Action::Ignore };
-    frame.traceReady = memory::Read(result.trace, kNativeTraceStartOffset, frame.source, memory::FailureDomain::Bullet) &&
-                       memory::Read(result.trace, kNativeTraceEndOffset, frame.end, memory::FailureDomain::Bullet) &&
+    frame.traceReady = memory::ReadPair(result.trace, kNativeTraceStartOffset, frame.source,
+                                      result.trace, kNativeTraceEndOffset, frame.end, memory::FailureDomain::Bullet) &&
                        ValidPellet(frame.source, frame.end);
     return { KHook::Action::Ignore };
 }
