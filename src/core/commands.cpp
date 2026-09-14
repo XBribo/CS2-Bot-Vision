@@ -53,7 +53,7 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
     cs2bv::commands::PrintToCaller(context, "[BotVision] smoke: mode=%d blocked=%lld/%lld heHoles=%d\n",
                                    cs2bv::bot_vision::GetSmokeMode(), cs2bv::bot_vision::GetBlockedCount(),
                                    cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetActiveBlastCount());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] bullets: %s holes=%d\n", cs2bv::bot_vision::GetBulletDiag(),
+    cs2bv::commands::PrintToCaller(context, "[BotVision] bulletHoles=%d\n",
                                    cs2bv::bot_vision::GetActiveBulletHoleCount());
 }
 

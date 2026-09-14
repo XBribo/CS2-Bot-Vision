@@ -55,9 +55,6 @@ void SetBulletRadiusShotgun(float value);
 // Returns the shotgun bullet tunnel radius
 float GetBulletRadiusShotgun();
 
-// Returns the active weapon probe
-const char* GetWeaponProbe();
-
 // Sets the bullet tunnel lifetime
 void SetBulletDuration(float value);
 
@@ -72,15 +69,6 @@ bool GetBulletHolesEnabled();
 
 // Returns the retained bullet tunnel count
 int GetActiveBulletHoleCount();
-
-// Returns bullet capture diagnostics
-const char* GetBulletDiag();
-
-// Returns the pellet hook call count
-int64_t GetBulletCount();
-
-// Returns the most recently captured pellet
-const char* GetLastBulletInfo();
 
 // Returns the smoke hook call count
 int64_t GetHitCount();

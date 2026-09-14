@@ -119,9 +119,6 @@ void SetBulletRadiusShotgun(float value) { bullet_vision::SetShotgunRadius(value
 // Returns the shotgun bullet tunnel radius
 float GetBulletRadiusShotgun() { return bullet_vision::GetShotgunRadius(); }
 
-// Returns the active weapon diagnostic
-const char* GetWeaponProbe() { return bullet_vision::GetWeaponProbe(); }
-
 // Sets the bullet tunnel lifetime
 void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
 
@@ -136,15 +133,6 @@ bool GetBulletHolesEnabled() { return bullet_vision::GetHolesEnabled(); }
 
 // Returns the active bullet tunnel count
 int GetActiveBulletHoleCount() { return bullet_vision::GetActiveHoleCount(); }
-
-// Returns bullet capture diagnostics
-const char* GetBulletDiag() { return bullet_vision::GetDiagnostics(); }
-
-// Returns the captured pellet count
-int64_t GetBulletCount() { return bullet_vision::GetBulletCount(); }
-
-// Returns the last captured pellet diagnostic
-const char* GetLastBulletInfo() { return bullet_vision::GetLastBulletInfo(); }
 
 // Returns the smoke hook call count
 int64_t GetHitCount() { return smoke_vision::GetHitCount(); }

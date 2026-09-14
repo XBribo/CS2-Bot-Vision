@@ -24,11 +24,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cinttypes>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -46,7 +44,6 @@ struct BulletHole
 struct BulletInfluence
 {
     BulletHole hole;
-    float age;
     float begin;
     float end;
 };
@@ -111,8 +108,6 @@ struct PelletFrame
     bool traceReady = false;
     float source[3]{};
     float end[3]{};
-    float direction[3]{};
-    float shotAngles[3]{};
 };
 struct PelletResultFrame
 {
@@ -135,20 +130,6 @@ std::atomic<int> g_durationMilli{ 1000 };
 std::atomic<int> g_holesEnabled{ 1 };
 
 thread_local WeaponDefinitionCacheEntry g_weaponCache[kWeaponCacheSize];
-std::atomic<int> g_lastWeaponDefinition{ -1 };
-std::atomic<int> g_lastWeaponShotgun{ 0 };
-std::atomic<int64_t> g_bulletCount{ 0 };
-std::atomic<int64_t> g_nativeResultCount{ 0 };
-std::atomic<int64_t> g_missingResultCount{ 0 };
-std::atomic<int64_t> g_skippedModeCount{ 0 };
-std::atomic<int64_t> g_skippedNoSmokeCount{ 0 };
-std::atomic<int64_t> g_heTraceAttempts{ 0 };
-std::atomic<int64_t> g_heTraceHits{ 0 };
-std::mutex g_lastBulletMutex;
-float g_lastBulletSource[3] = { 0.0F, 0.0F, 0.0F };
-float g_lastBulletEnd[3] = { 0.0F, 0.0F, 0.0F };
-float g_lastBulletAngles[3] = { 0.0F, 0.0F, 0.0F };
-float g_lastBulletDirection[3] = { 0.0F, 0.0F, 0.0F };
 
 // Mixes a pointer for fixed-size cache indexing
 uint64_t MixPointerValue(uintptr_t value)
@@ -272,9 +253,10 @@ int CachedActiveWeaponDefinition(void* shooter)
     return definitionIndex;
 }
 
-// Validates and normalizes one captured pellet segment.
-bool NormalizePellet(const float (&source)[3], const float (&end)[3], float (&direction)[3])
+// Validates one captured pellet segment.
+bool ValidPellet(const float (&source)[3], const float (&end)[3])
 {
+    float direction[3]{};
     for (int index = 0; index < 3; ++index)
     {
         if (!std::isfinite(source[index]) || !std::isfinite(end[index])) return false;
@@ -282,8 +264,6 @@ bool NormalizePellet(const float (&source)[3], const float (&end)[3], float (&di
     }
     const float length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
     if (!std::isfinite(length) || length <= 1e-4F) return false;
-    for (float& component : direction)
-        component /= length;
     return true;
 }
 
@@ -305,7 +285,7 @@ KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float star
     if (!frame.captureRequested || frame.traceReady) return { KHook::Action::Ignore };
     frame.traceReady = memory::Read(result.trace, kNativeTraceStartOffset, frame.source, memory::FailureDomain::Bullet) &&
                        memory::Read(result.trace, kNativeTraceEndOffset, frame.end, memory::FailureDomain::Bullet) &&
-                       NormalizePellet(frame.source, frame.end, frame.direction);
+                       ValidPellet(frame.source, frame.end);
     return { KHook::Action::Ignore };
 }
 
@@ -336,20 +316,8 @@ KHook::Return<int64_t> PelletTracePre(int64_t a1,
                                       void* a19,
                                       int64_t a20) noexcept
 {
-    g_bulletCount.fetch_add(1, std::memory_order_relaxed);
     PelletFrame frame{ a1 };
-    if (GetHolesEnabled())
-    {
-        if (!smoke_vision::IsVolumeMode()) g_skippedModeCount.fetch_add(1, std::memory_order_relaxed);
-        else if (!smoke_vision::HasSmokeProjectiles())
-            g_skippedNoSmokeCount.fetch_add(1, std::memory_order_relaxed);
-        else
-            frame.captureRequested = true;
-    }
-    if (frame.captureRequested)
-    {
-        memory::Read(reinterpret_cast<const void*>(a3), 0, frame.shotAngles, memory::FailureDomain::Bullet);
-    }
+    frame.captureRequested = GetHolesEnabled() && smoke_vision::IsVolumeMode() && smoke_vision::HasSmokeProjectiles();
     g_pelletFrames.push_back(frame);
     return { KHook::Action::Ignore };
 }
@@ -383,13 +351,7 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 {
     const PelletFrame frame = g_pelletFrames.back();
     g_pelletFrames.pop_back();
-    if (!frame.captureRequested) return { KHook::Action::Ignore };
-    if (!frame.traceReady)
-    {
-        g_missingResultCount.fetch_add(1, std::memory_order_relaxed);
-        return { KHook::Action::Ignore };
-    }
-    g_nativeResultCount.fetch_add(1, std::memory_order_relaxed);
+    if (!frame.captureRequested || !frame.traceReady) return { KHook::Action::Ignore };
 
     void* shooter = nullptr;
     if (frame.shooter)
@@ -405,19 +367,6 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
     const bool shotgun = IsShotgunDefinition(definitionIndex);
     const float radius = shotgun ? GetShotgunRadius() : GetRadius();
     OnHole(frame.source, frame.end, radius);
-    g_lastWeaponDefinition.store(definitionIndex, std::memory_order_relaxed);
-    g_lastWeaponShotgun.store(shotgun ? 1 : 0, std::memory_order_relaxed);
-    {
-        std::scoped_lock lock(g_lastBulletMutex);
-        for (int index = 0; index < 3; ++index)
-        {
-            g_lastBulletSource[index] = frame.source[index];
-            g_lastBulletEnd[index] = frame.end[index];
-            g_lastBulletAngles[index] = frame.shotAngles[index];
-            g_lastBulletDirection[index] = frame.direction[index];
-        }
-    }
-
     return { KHook::Action::Ignore };
 }
 
@@ -520,9 +469,7 @@ bool IsLineUnobstructed(const float* from, const float* to)
     Vector end(to[0], to[1], to[2]);
     CTraceFilter filter(8193, COLLISION_GROUP_DEFAULT, true);
     CGameTrace trace;
-    g_heTraceAttempts.fetch_add(1, std::memory_order_relaxed);
     g_traceShape(nullptr, ray, start, end, &filter, &trace);
-    if (trace.DidHit()) g_heTraceHits.fetch_add(1, std::memory_order_relaxed);
     return !trace.DidHit() || trace.m_flFraction >= 0.999F;
 }
 
@@ -582,23 +529,24 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         if (age < 0.0F || age >= duration) continue;
 
         g_holes[writeIndex++] = holeRecord;
-        const float radius = holeRecord.radius;
+        const float radius = holeRecord.radius * (1.0F - age / duration);
         if (radius <= 0.0F) continue;
 
-        BulletHole shaderHole = holeRecord;
+        BulletHole tunnel = holeRecord;
+        tunnel.radius = radius;
         const float travelAmount = std::min(age * 10.0F, 1.0F);
         for (int axis = 0; axis < 3; ++axis)
         {
-            shaderHole.end[axis] = holeRecord.start[axis] + ((holeRecord.end[axis] - holeRecord.start[axis]) * travelAmount);
+            tunnel.end[axis] = holeRecord.start[axis] + ((holeRecord.end[axis] - holeRecord.start[axis]) * travelAmount);
         }
 
         float lineAmount = 0.0F;
         float holeAmount = 0.0F;
-        const float distanceSquared = ClosestSegmentParameters(from, to, shaderHole.start, shaderHole.end, lineAmount, holeAmount);
+        const float distanceSquared = ClosestSegmentParameters(from, to, tunnel.start, tunnel.end, lineAmount, holeAmount);
         if (distanceSquared >= radius * radius) continue;
 
-        const float hole[3] = { shaderHole.end[0] - shaderHole.start[0], shaderHole.end[1] - shaderHole.start[1],
-                                shaderHole.end[2] - shaderHole.start[2] };
+        const float hole[3] = { tunnel.end[0] - tunnel.start[0], tunnel.end[1] - tunnel.start[1],
+                                tunnel.end[2] - tunnel.start[2] };
         const float holeLengthSquared = (hole[0] * hole[0]) + (hole[1] * hole[1]) + (hole[2] * hole[2]);
         const float directionDot =
             holeLengthSquared > 0.001F
@@ -610,8 +558,8 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         float end = 0.0F;
         if (std::abs(directionDot) > 0.95F)
         {
-            const float startOffset[3] = { shaderHole.start[0] - from[0], shaderHole.start[1] - from[1], shaderHole.start[2] - from[2] };
-            const float endOffset[3] = { shaderHole.end[0] - from[0], shaderHole.end[1] - from[1], shaderHole.end[2] - from[2] };
+            const float startOffset[3] = { tunnel.start[0] - from[0], tunnel.start[1] - from[1], tunnel.start[2] - from[2] };
+            const float endOffset[3] = { tunnel.end[0] - from[0], tunnel.end[1] - from[1], tunnel.end[2] - from[2] };
             const float startAmount = (startOffset[0] * line[0] + startOffset[1] * line[1] + startOffset[2] * line[2]) / lineLengthSquared;
             const float endAmount = (endOffset[0] * line[0] + endOffset[1] * line[1] + endOffset[2] * line[2]) / lineLengthSquared;
             const float padding = std::sqrt((radius * radius) - distanceSquared) / lineLength;
@@ -626,7 +574,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
             end = Saturate(lineAmount + halfAmount);
         }
 
-        if (end > begin) influences.push_back({ .hole = shaderHole, .age = age, .begin = begin, .end = end });
+        if (end > begin) influences.push_back({ .hole = tunnel, .begin = begin, .end = end });
     }
     g_holes.resize(writeIndex);
     if (influences.empty()) return density;
@@ -673,21 +621,16 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
                 if (midpointAmount < influence.begin || midpointAmount > influence.end) continue;
 
                 const float distance = std::sqrt(DistanceSquaredToSegment(midpoint, influence.hole.start, influence.hole.end));
-                const float endpointDelta[3] = { midpoint[0] - influence.hole.end[0], midpoint[1] - influence.hole.end[1],
-                                                 midpoint[2] - influence.hole.end[2] };
-                const float endpointDistance = std::sqrt((endpointDelta[0] * endpointDelta[0]) + (endpointDelta[1] * endpointDelta[1]) +
-                                                         (endpointDelta[2] * endpointDelta[2]));
-                const float normalizedDistance = distance / influence.hole.radius;
-                const float endpointFade = std::min(endpointDistance * 0.01F, 1.0F);
-                const float strength = SmoothStep(1.0F - Saturate(normalizedDistance - endpointFade + 1.0F + (influence.age / duration)));
+                // The inner half is clear; the outer half feathers back to full density.
+                const float edge = Saturate((distance / influence.hole.radius - 0.5F) * 2.0F);
+                const float strength = 1.0F - SmoothStep(edge);
                 maximumStrength = std::max(maximumStrength, strength);
             }
             if (maximumStrength <= 0.001F) continue;
 
             const float sliceDensity = std::max(sampler(sliceBegin, sliceEnd), 0.0F);
-            const float deformationStrength = maximumStrength * maximumStrength * maximumStrength;
             sampledDensity += sliceDensity;
-            weightedDensity += sliceDensity * (1.0F - deformationStrength);
+            weightedDensity += sliceDensity * (1.0F - maximumStrength);
         }
     }
 
@@ -729,41 +672,4 @@ int GetActiveHoleCount()
     return static_cast<int>(g_holes.size());
 }
 
-// Returns the pellet hook call count
-int64_t GetBulletCount() { return g_bulletCount.load(std::memory_order_relaxed); }
-
-// Formats the last captured pellet
-const char* GetLastBulletInfo()
-{
-    static char buffer[224];
-    std::scoped_lock lock(g_lastBulletMutex);
-    std::snprintf(buffer, sizeof(buffer), "src=(%.1f,%.1f,%.1f) end=(%.1f,%.1f,%.1f) ang=(%.1f,%.1f,%.1f) fwd=(%.2f,%.2f,%.2f)",
-                  g_lastBulletSource[0], g_lastBulletSource[1], g_lastBulletSource[2],
-                  g_lastBulletEnd[0], g_lastBulletEnd[1], g_lastBulletEnd[2],
-                  g_lastBulletAngles[0], g_lastBulletAngles[1], g_lastBulletAngles[2],
-                  g_lastBulletDirection[0], g_lastBulletDirection[1], g_lastBulletDirection[2]);
-    return buffer;
-}
-
-// Formats native trace and bullet capture diagnostics
-const char* GetDiagnostics()
-{
-    static char buffer[512];
-    std::snprintf(buffer, sizeof(buffer),
-                  "enabled=%d hook=%s captured=%" PRId64 " missing=%" PRId64,
-                  g_holesEnabled.load(std::memory_order_relaxed),
-                  g_pelletTraceHook.Active() && g_pelletResultHook.Active() ? "ON" : "OFF",
-                  g_nativeResultCount.load(std::memory_order_relaxed), g_missingResultCount.load(std::memory_order_relaxed));
-    return buffer;
-}
-
-// Formats the most recently resolved active weapon
-const char* GetWeaponProbe()
-{
-    static char buffer[128];
-    const int definitionIndex = g_lastWeaponDefinition.load(std::memory_order_relaxed);
-    std::snprintf(buffer, sizeof(buffer), "lastDef=%d shotgun=%d shotgunRadius=%.1f normalRadius=%.1f getSlot=%s", definitionIndex,
-                  g_lastWeaponShotgun.load(std::memory_order_relaxed), GetShotgunRadius(), GetRadius(), g_getSlot ? "OK" : "NULL");
-    return buffer;
-}
 } // namespace cs2bv::bullet_vision

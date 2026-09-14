@@ -53,15 +53,4 @@ bool GetHolesEnabled();
 // Returns the number of retained bullet tunnels
 int GetActiveHoleCount();
 
-// Returns the number of captured pellet hook calls
-int64_t GetBulletCount();
-
-// Formats the most recently captured pellet
-const char* GetLastBulletInfo();
-
-// Formats bullet capture diagnostics
-const char* GetDiagnostics();
-
-// Formats the active weapon probe
-const char* GetWeaponProbe();
 } // namespace cs2bv::bullet_vision
