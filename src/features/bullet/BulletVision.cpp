@@ -23,11 +23,13 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -519,8 +521,8 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
 
     const float now = game_time::Now();
     std::scoped_lock lock(g_holeMutex);
-    std::vector<BulletInfluence> influences;
-    influences.reserve(g_holes.size());
+    std::array<BulletInfluence, kMaxBulletHoles> influenceStorage;
+    size_t influenceCount = 0;
     size_t writeIndex = 0;
     for (size_t index = 0; index < g_holes.size(); ++index)
     {
@@ -574,32 +576,33 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
             end = Saturate(lineAmount + halfAmount);
         }
 
-        if (end > begin) influences.push_back({ .hole = tunnel, .begin = begin, .end = end });
+        if (end > begin) influenceStorage[influenceCount++] = { .hole = tunnel, .begin = begin, .end = end };
     }
     g_holes.resize(writeIndex);
+    const std::span influences(influenceStorage.data(), influenceCount);
     if (influences.empty()) return density;
 
     std::ranges::sort(influences, [](const BulletInfluence& left, const BulletInfluence& right) {
         return left.begin < right.begin;
     });
 
-    std::vector<std::pair<float, float>> intervals;
-    intervals.reserve(influences.size());
+    std::array<std::pair<float, float>, kMaxBulletHoles> intervalStorage;
+    size_t intervalCount = 0;
     for (const BulletInfluence& influence : influences)
     {
-        if (intervals.empty() || influence.begin > intervals.back().second + 0.0001F)
+        if (intervalCount == 0 || influence.begin > intervalStorage[intervalCount - 1].second + 0.0001F)
         {
-            intervals.emplace_back(influence.begin, influence.end);
+            intervalStorage[intervalCount++] = { influence.begin, influence.end };
         }
         else
         {
-            intervals.back().second = std::max(intervals.back().second, influence.end);
+            intervalStorage[intervalCount - 1].second = std::max(intervalStorage[intervalCount - 1].second, influence.end);
         }
     }
 
     float sampledDensity = 0.0F;
     float weightedDensity = 0.0F;
-    for (const std::pair<float, float>& interval : intervals)
+    for (const std::pair<float, float>& interval : std::span(intervalStorage.data(), intervalCount))
     {
         for (int slice = 0; slice < kDensitySlices; ++slice)
         {

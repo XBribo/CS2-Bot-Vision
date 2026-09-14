@@ -16,10 +16,12 @@
 #include <tier0/dbg.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,7 +39,8 @@ struct HeBlast
 struct HeInfluence
 {
     HeBlast blast;
-    float age;
+    float impulse;
+    float recovery;
     float begin;
     float end;
 };
@@ -68,14 +71,9 @@ float SmoothStep(float value)
 }
 
 // Evaluates the HE density multiplier at one smoke point
-float DensityScale(float distance, float age, float radius, float duration)
+float DensityScale(float distance, float impulse, float recovery, float radius, float radiusScale)
 {
-    const float radiusScale = radius / 250.0F;
-    const float impulse = std::pow(1.0F - SmoothStep(age * 0.5F), 128.0F);
     const float radial = SmoothStep((distance + impulse * radius - 200.0F * radiusScale) / (40.0F * radiusScale));
-    const float recoveryStart = duration * 0.1F;
-    const float recoveryLength = std::max(duration - recoveryStart, 0.001F);
-    const float recovery = std::pow(SmoothStep((age - recoveryStart) / recoveryLength), 1.8F);
     return 0.02F + (0.98F * std::max(radial, recovery));
 }
 
@@ -168,9 +166,12 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     if (lineLengthSquared <= 0.001F) return density;
 
     const float now = game_time::Now();
+    const float radiusScale = radius / 250.0F;
+    const float recoveryStart = duration * 0.1F;
+    const float recoveryLength = std::max(duration - recoveryStart, 0.001F);
     std::scoped_lock lock(g_blastMutex);
-    std::vector<HeInfluence> influences;
-    influences.reserve(g_blasts.size());
+    std::array<HeInfluence, kMaxHeBlasts> influenceStorage;
+    size_t influenceCount = 0;
     size_t writeIndex = 0;
     for (size_t index = 0; index < g_blasts.size(); ++index)
     {
@@ -194,32 +195,39 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         const float halfAmount = std::sqrt((effectRadius * effectRadius) - distanceSquared) / std::sqrt(lineLengthSquared);
         const float begin = Saturate(closestAmount - halfAmount);
         const float end = Saturate(closestAmount + halfAmount);
-        if (end > begin) influences.push_back({ .blast = blast, .age = age, .begin = begin, .end = end });
+        if (end > begin)
+        {
+            const float recovery = std::pow(SmoothStep((age - recoveryStart) / recoveryLength), 1.8F);
+            influenceStorage[influenceCount++] = {
+                .blast = blast, .impulse = impulse, .recovery = recovery, .begin = begin, .end = end
+            };
+        }
     }
     g_blasts.resize(writeIndex);
+    const std::span influences(influenceStorage.data(), influenceCount);
     if (influences.empty()) return density;
 
     std::ranges::sort(influences, [](const HeInfluence& left, const HeInfluence& right) {
         return left.begin < right.begin;
     });
 
-    std::vector<std::pair<float, float>> intervals;
-    intervals.reserve(influences.size());
+    std::array<std::pair<float, float>, kMaxHeBlasts> intervalStorage;
+    size_t intervalCount = 0;
     for (const HeInfluence& influence : influences)
     {
-        if (intervals.empty() || influence.begin > intervals.back().second + 0.0001F)
+        if (intervalCount == 0 || influence.begin > intervalStorage[intervalCount - 1].second + 0.0001F)
         {
-            intervals.emplace_back(influence.begin, influence.end);
+            intervalStorage[intervalCount++] = { influence.begin, influence.end };
         }
         else
         {
-            intervals.back().second = std::max(intervals.back().second, influence.end);
+            intervalStorage[intervalCount - 1].second = std::max(intervalStorage[intervalCount - 1].second, influence.end);
         }
     }
 
     float sampledDensity = 0.0F;
     float weightedDensity = 0.0F;
-    for (const std::pair<float, float>& interval : intervals)
+    for (const std::pair<float, float>& interval : std::span(intervalStorage.data(), intervalCount))
     {
         for (int slice = 0; slice < kDensitySlices; ++slice)
         {
@@ -243,7 +251,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
                 const float delta[3] = { midpoint[0] - influence.blast.x, midpoint[1] - influence.blast.y,
                                          midpoint[2] - influence.blast.z };
                 const float distance = std::sqrt((delta[0] * delta[0]) + (delta[1] * delta[1]) + (delta[2] * delta[2]));
-                minimumScale = std::min(minimumScale, DensityScale(distance, influence.age, radius, duration));
+                minimumScale = std::min(minimumScale, DensityScale(distance, influence.impulse, influence.recovery, radius, radiusScale));
             }
             if (minimumScale >= 0.999F) continue;
 
