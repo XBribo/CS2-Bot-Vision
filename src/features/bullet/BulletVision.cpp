@@ -560,9 +560,8 @@ void OnHole(const float start[3], const float end[3], float radius)
 }
 
 // Applies active bullet records to native density near each tunnel
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler, DensityProbe* probe)
+float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler)
 {
-    if (probe) *probe = {};
     const float duration = GetDuration();
     if (!from || !to || !sampler || density <= 0.0F || duration <= 0.0F) return density;
 
@@ -573,7 +572,6 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
 
     const float now = game_time::Now();
     std::scoped_lock lock(g_holeMutex);
-    if (probe) probe->records = static_cast<int>(g_holes.size());
     std::vector<BulletInfluence> influences;
     influences.reserve(g_holes.size());
     size_t writeIndex = 0;
@@ -581,11 +579,9 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
     {
         const BulletHole holeRecord = g_holes[index];
         const float age = now - holeRecord.startTime;
-        if (probe && (index == 0 || age < probe->youngestAge)) probe->youngestAge = age;
         if (age < 0.0F || age >= duration) continue;
 
         g_holes[writeIndex++] = holeRecord;
-        if (probe) ++probe->active;
         const float radius = holeRecord.radius;
         if (radius <= 0.0F) continue;
 
@@ -599,11 +595,6 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         float lineAmount = 0.0F;
         float holeAmount = 0.0F;
         const float distanceSquared = ClosestSegmentParameters(from, to, shaderHole.start, shaderHole.end, lineAmount, holeAmount);
-        if (probe)
-        {
-            const float distance = std::sqrt(distanceSquared);
-            if (probe->closestDistance < 0.0F || distance < probe->closestDistance) probe->closestDistance = distance;
-        }
         if (distanceSquared >= radius * radius) continue;
 
         const float hole[3] = { shaderHole.end[0] - shaderHole.start[0], shaderHole.end[1] - shaderHole.start[1],
@@ -638,7 +629,6 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         if (end > begin) influences.push_back({ .hole = shaderHole, .age = age, .begin = begin, .end = end });
     }
     g_holes.resize(writeIndex);
-    if (probe) probe->overlaps = static_cast<int>(influences.size());
     if (influences.empty()) return density;
 
     std::ranges::sort(influences, [](const BulletInfluence& left, const BulletInfluence& right) {
@@ -692,7 +682,6 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
                 const float strength = SmoothStep(1.0F - Saturate(normalizedDistance - endpointFade + 1.0F + (influence.age / duration)));
                 maximumStrength = std::max(maximumStrength, strength);
             }
-            if (probe) probe->maximumStrength = std::max(probe->maximumStrength, maximumStrength);
             if (maximumStrength <= 0.001F) continue;
 
             const float sliceDensity = std::max(sampler(sliceBegin, sliceEnd), 0.0F);

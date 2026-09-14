@@ -158,9 +158,6 @@ bool IsHookedActive() { return smoke_vision::AutoListReady(); }
 // Returns the smoke hook diagnostic
 const char* GetHookedStatus() { return smoke_vision::GetHookedStatus(); }
 
-// Returns bullet-hole density diagnostics from actual visibility queries.
-const char* GetSmokeHoleDiag() { return smoke_vision::GetHoleDiagnostics(); }
-
 // Forwards a diagnostic smoke density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength)
 {

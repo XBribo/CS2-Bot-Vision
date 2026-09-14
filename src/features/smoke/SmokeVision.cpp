@@ -16,13 +16,11 @@
 #include <tier0/dbg.h>
 
 #include <atomic>
-#include <cinttypes>
 #include <climits>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <mutex>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -47,22 +45,6 @@ void** g_autoListHead = nullptr;
 
 std::atomic<int64_t> g_hitCount{ 0 };
 std::atomic<int64_t> g_blockedCount{ 0 };
-std::atomic<int64_t> g_holeChecks{ 0 };
-std::atomic<int64_t> g_holeActiveChecks{ 0 };
-std::atomic<int64_t> g_holeOverlapChecks{ 0 };
-std::atomic<int64_t> g_holeReducedChecks{ 0 };
-std::atomic<int64_t> g_holeOpenedChecks{ 0 };
-struct HoleVisibilityProbe
-{
-    float from[3]{};
-    float to[3]{};
-    float raw = 0.0F;
-    float bullet = 0.0F;
-    float threshold = 0.0F;
-    bullet_vision::DensityProbe holes;
-};
-std::mutex g_holeProbeMutex;
-HoleVisibilityProbe g_lastHoleProbe;
 std::string g_hookedStatus = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 std::atomic<int> g_smokeMode{ 0 };
 std::atomic<int> g_densityThresholdMilli{ 230 };
@@ -419,23 +401,7 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
         float bulletDensity = density;
         if (bullet_vision::GetHolesEnabled())
         {
-            bullet_vision::DensityProbe probe;
-            bulletDensity = bullet_vision::AdjustDensity(fromValues, toValues, density, &SampleNativeDensity, &probe);
-            g_holeChecks.fetch_add(1, std::memory_order_relaxed);
-            if (probe.active > 0) g_holeActiveChecks.fetch_add(1, std::memory_order_relaxed);
-            if (probe.overlaps > 0) g_holeOverlapChecks.fetch_add(1, std::memory_order_relaxed);
-            if (bulletDensity < density) g_holeReducedChecks.fetch_add(1, std::memory_order_relaxed);
-            if (bulletDensity < threshold) g_holeOpenedChecks.fetch_add(1, std::memory_order_relaxed);
-            if (probe.records > 0)
-            {
-                std::scoped_lock lock(g_holeProbeMutex);
-                std::memcpy(g_lastHoleProbe.from, fromValues, sizeof(fromValues));
-                std::memcpy(g_lastHoleProbe.to, toValues, sizeof(toValues));
-                g_lastHoleProbe.raw = density;
-                g_lastHoleProbe.bullet = bulletDensity;
-                g_lastHoleProbe.threshold = threshold;
-                g_lastHoleProbe.holes = probe;
-            }
+            bulletDensity = bullet_vision::AdjustDensity(fromValues, toValues, density, &SampleNativeDensity);
         }
         if (he_vision::AdjustDensity(fromValues, toValues, bulletDensity, &SampleNativeDensity) < threshold)
             return { KHook::Action::Supersede, true };
@@ -447,19 +413,6 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
 }
 
 } // namespace
-
-// Reports whether real visibility queries overlap holes and cross the smoke threshold.
-const char* GetHoleDiagnostics()
-{
-    static thread_local char buffer[640];
-    std::scoped_lock lock(g_holeProbeMutex);
-    const HoleVisibilityProbe& last = g_lastHoleProbe;
-    std::snprintf(buffer, sizeof(buffer),
-                  "overlap=%" PRId64 " opened=%" PRId64 " lastDensity=%.3f->%.3f threshold=%.3f",
-                  g_holeOverlapChecks.load(std::memory_order_relaxed), g_holeOpenedChecks.load(std::memory_order_relaxed),
-                  last.raw, last.bullet, last.threshold);
-    return buffer;
-}
 
 // Installs required and optional smoke hooks
 bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule, char* error, size_t maxLength)

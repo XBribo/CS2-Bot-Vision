@@ -11,16 +11,6 @@
 namespace cs2bv::bullet_vision {
 using DensitySamplerFn = float (*)(const float* from, const float* to);
 
-struct DensityProbe
-{
-    int records = 0;
-    int active = 0;
-    int overlaps = 0;
-    float youngestAge = -1.0F;
-    float closestDistance = -1.0F;
-    float maximumStrength = 0.0F;
-};
-
 // Resolves and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule);
 
@@ -34,7 +24,7 @@ bool IsLineUnobstructed(const float* from, const float* to);
 void OnHole(const float start[3], const float end[3], float radius);
 
 // Applies the bullet tunnel model to native line density
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler, DensityProbe* probe = nullptr);
+float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler);
 
 // Sets the normal bullet tunnel radius
 void SetRadius(float value);

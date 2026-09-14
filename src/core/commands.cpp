@@ -55,7 +55,6 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
                                    cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetActiveBlastCount());
     cs2bv::commands::PrintToCaller(context, "[BotVision] bullets: %s holes=%d\n", cs2bv::bot_vision::GetBulletDiag(),
                                    cs2bv::bot_vision::GetActiveBulletHoleCount());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] holes: %s\n", cs2bv::bot_vision::GetSmokeHoleDiag());
 }
 
 // Tests smoke density along an explicit line

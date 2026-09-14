@@ -37,9 +37,6 @@ int64_t GetHitCount();
 // Returns the number of lines blocked by density
 int64_t GetBlockedCount();
 
-// Formats bullet-hole density diagnostics from actual visibility queries.
-const char* GetHoleDiagnostics();
-
 // Returns the smoke hook diagnostic state
 const char* GetHookedStatus();
 

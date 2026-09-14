@@ -94,9 +94,6 @@ bool IsHookedActive();
 // Returns the smoke hook diagnostic
 const char* GetHookedStatus();
 
-// Formats bullet-hole density diagnostics from actual visibility queries.
-const char* GetSmokeHoleDiag();
-
 // Formats a diagnostic smoke density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength);
 
