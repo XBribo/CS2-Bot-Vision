@@ -50,14 +50,12 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
               "Print BotVision plugin status.",
               FCVAR_NONE)
 {
-    cs2bv::commands::PrintToCaller(context, "[BotVision] hits=%lld blocked=%lld hooked=%s heHoles=%d heEvent=%s\n",
-                                   cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetBlockedCount(),
-                                   cs2bv::bot_vision::GetHookedStatus(), cs2bv::bot_vision::GetActiveBlastCount(),
-                                   cs2bv::bot_vision::GetHeListenerStatus());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] bullets=%lld holes=%d last: %s\n", cs2bv::bot_vision::GetBulletCount(),
-                                   cs2bv::bot_vision::GetActiveBulletHoleCount(), cs2bv::bot_vision::GetLastBulletInfo());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] bulletDiag: %s\n", cs2bv::bot_vision::GetBulletDiag());
-    cs2bv::commands::PrintToCaller(context, "[BotVision] safeReadFailures: %s\n", cs2bv::bot_vision::GetSafeReadDiag());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] smoke: mode=%d blocked=%lld/%lld heHoles=%d\n",
+                                   cs2bv::bot_vision::GetSmokeMode(), cs2bv::bot_vision::GetBlockedCount(),
+                                   cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetActiveBlastCount());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] bullets: %s holes=%d\n", cs2bv::bot_vision::GetBulletDiag(),
+                                   cs2bv::bot_vision::GetActiveBulletHoleCount());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] holes: %s\n", cs2bv::bot_vision::GetSmokeHoleDiag());
 }
 
 // Tests smoke density along an explicit line
