@@ -40,14 +40,6 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
     modules::ModuleInfo serverModule = modules::ModuleFromInterfacePtr(serverInterface);
     if (!serverModule)
     {
-#ifdef _WIN32
-        serverModule = modules::ModuleFromName("server.dll");
-#else
-        serverModule = modules::ModuleFromName("libserver.so");
-#endif
-    }
-    if (!serverModule)
-    {
         if (error && maxLength > 0)
         {
             std::snprintf(error, maxLength, "could not resolve CS2 server module from interface ptr=%p", serverInterface);

@@ -34,9 +34,6 @@ void* FindPatternIn(const ModuleInfo& module, const std::vector<uint8_t>& patter
 // Finds every pattern match in the selected module segments
 std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild);
 
-// Resolve a module by basename, e.g. server.dll or libserver.so
-ModuleInfo ModuleFromName(const char* moduleName);
-
 // Resolves executable code ranges from a loaded module
 ModuleInfo ModuleCodeFromName(const char* moduleName);
 
