@@ -1,5 +1,11 @@
 //
 
+#ifndef _WIN32
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#endif
+
 #include "core/memory_module.h"
 
 #ifdef _WIN32
@@ -12,8 +18,12 @@
 #include <winnt.h>
 #else
 #include <dlfcn.h>
+#include <elf.h>
+#include <fcntl.h>
 #include <link.h>
-#include <strings.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <algorithm>
@@ -25,23 +35,14 @@
 #include <string>
 #include <vector>
 
+#include <tier0/platform.h>
+#include "metamod_oslink.h"
+#ifdef snprintf
+#undef snprintf
+#endif
+
 namespace cs2bv::modules {
 namespace {
-// Returns the final component of a platform path
-const char* BaseName(const char* path)
-{
-    if (!path) return "";
-    const char* slash = std::strrchr(path, '/');
-    const char* backslash = std::strrchr(path, '\\');
-    const char* base = nullptr;
-    if (slash && backslash) base = std::max(slash, backslash);
-    else if (slash)
-        base = slash;
-    else
-        base = backslash;
-    return base ? base + 1 : path;
-}
-
 // Formats a signature error into an optional output buffer
 void SetError(char* out, size_t outLen, const char* fmt, const char* a, const char* b = nullptr)
 {
@@ -129,139 +130,119 @@ ModuleInfo ModuleSectionFromHandle(HMODULE handle, const char* sectionName)
     return out;
 }
 #else
-// Compares a loaded module path with a requested module name
-bool NameMatches(const char* loadedPath, const char* moduleName)
+// Adds one mapped ELF segment and updates the module bounds.
+void AddSegment(ModuleInfo& module, uintptr_t address, size_t size)
 {
-    if (!loadedPath || !loadedPath[0] || !moduleName || !moduleName[0]) return false;
-    const char* loadedBase = BaseName(loadedPath);
-    const char* wantBase = BaseName(moduleName);
-    return std::strcmp(loadedBase, wantBase) == 0;
+    if (size == 0) return;
+
+    auto* base = reinterpret_cast<unsigned char*>(address);
+    module.segments.push_back({ .base = base, .size = size });
+
+    if (!module.base || address < reinterpret_cast<uintptr_t>(module.base)) module.base = base;
+
+    const uintptr_t end = address + size;
+    const uintptr_t currentEnd = reinterpret_cast<uintptr_t>(module.base) + module.size;
+    if (end > currentEnd) module.size = static_cast<size_t>(end - reinterpret_cast<uintptr_t>(module.base));
 }
 
-// Collects readable load segments from one ELF module
-void FillModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
+// Resolves ELF load segments directly from the handle's link_map.
+bool FillModuleFromHandle(HINSTANCE handle, ModuleInfo& image, ModuleInfo& code)
 {
-    uintptr_t minAddr = UINTPTR_MAX;
-    uintptr_t maxAddr = 0;
-    out.segments.clear();
+    if (!handle) return false;
 
-    for (int i = 0; i < info->dlpi_phnum; ++i)
+    link_map* linkMap = nullptr;
+    if (dlinfo(handle, RTLD_DI_LINKMAP, &linkMap) != 0 || !linkMap || !linkMap->l_name || !linkMap->l_name[0]) return false;
+
+    const int fileDescriptor = open(linkMap->l_name, O_RDONLY);
+    if (fileDescriptor == -1) return false;
+
+    struct stat fileStatus{};
+    if (fstat(fileDescriptor, &fileStatus) != 0 || fileStatus.st_size <= 0)
     {
-        const ElfW(Phdr) & ph = info->dlpi_phdr[i];
-        if (ph.p_type != PT_LOAD || ph.p_memsz == 0) continue;
-
-        auto* segBase = reinterpret_cast<unsigned char*>(info->dlpi_addr + ph.p_vaddr);
-        size_t segSize = static_cast<size_t>(ph.p_memsz);
-        out.segments.push_back({ segBase, segSize });
-
-        uintptr_t start = reinterpret_cast<uintptr_t>(segBase);
-        uintptr_t end = start + segSize;
-        minAddr = std::min(minAddr, start);
-        maxAddr = std::max(maxAddr, end);
+        close(fileDescriptor);
+        return false;
     }
 
-    if (minAddr != UINTPTR_MAX && maxAddr > minAddr)
+    const size_t fileSize = static_cast<size_t>(fileStatus.st_size);
+    void* mappedFile = mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fileDescriptor, 0);
+    if (mappedFile == MAP_FAILED)
     {
-        out.base = reinterpret_cast<unsigned char*>(minAddr);
-        out.size = static_cast<size_t>(maxAddr - minAddr);
+        close(fileDescriptor);
+        return false;
     }
-}
 
-// Collects executable load segments from one ELF module
-void FillCodeModuleFromPhdr(dl_phdr_info* info, ModuleInfo& out)
-{
-    FillModuleFromPhdr(info, out);
-    out.segments.clear();
-    for (int i = 0; i < info->dlpi_phnum; ++i)
+    if (fileSize < sizeof(ElfW(Ehdr)))
     {
-        const ElfW(Phdr) & ph = info->dlpi_phdr[i];
-        if (ph.p_type != PT_LOAD || ph.p_memsz == 0 || (ph.p_flags & PF_X) == 0) continue;
-
-        auto* segmentBase = reinterpret_cast<unsigned char*>(info->dlpi_addr + ph.p_vaddr);
-        out.segments.push_back({ segmentBase, static_cast<size_t>(ph.p_memsz) });
+        munmap(mappedFile, fileSize);
+        close(fileDescriptor);
+        return false;
     }
-    if (out.segments.empty()) out = {};
-}
 
-struct FindByNameCtx
-{
-    const char* Name = nullptr;
-    ModuleInfo Result;
-};
-
-// Selects an ELF module by basename
-int FindByNameCallback(dl_phdr_info* info, size_t, void* data)
-{
-    auto* ctx = static_cast<FindByNameCtx*>(data);
-    if (!NameMatches(info->dlpi_name, ctx->Name)) return 0;
-
-    FillModuleFromPhdr(info, ctx->Result);
-    return ctx->Result ? 1 : 0;
-}
-
-// Resolves executable segments for a module basename
-int FindCodeByNameCallback(dl_phdr_info* info, size_t, void* data)
-{
-    auto* ctx = static_cast<FindByNameCtx*>(data);
-    if (!NameMatches(info->dlpi_name, ctx->Name)) return 0;
-
-    FillCodeModuleFromPhdr(info, ctx->Result);
-    return ctx->Result ? 1 : 0;
-}
-
-struct FindByAddressCtx
-{
-    uintptr_t Address = 0;
-    ModuleInfo Result;
-};
-
-struct FindExecutableAddressCtx
-{
-    uintptr_t Address = 0;
-    bool Found = false;
-};
-
-// Selects the ELF module containing an address
-int FindByAddressCallback(dl_phdr_info* info, size_t, void* data)
-{
-    auto* ctx = static_cast<FindByAddressCtx*>(data);
-    for (int i = 0; i < info->dlpi_phnum; ++i)
+    auto* elfHeader = static_cast<ElfW(Ehdr)*>(mappedFile);
+    const size_t programHeaderOffset = static_cast<size_t>(elfHeader->e_phoff);
+    const size_t programHeaderSize = static_cast<size_t>(elfHeader->e_phnum) * elfHeader->e_phentsize;
+    const bool validElf = std::memcmp(elfHeader->e_ident, ELFMAG, SELFMAG) == 0 &&
+                          elfHeader->e_ident[EI_CLASS] == ELFCLASS64 &&
+                          programHeaderOffset <= fileSize && programHeaderSize <= fileSize - programHeaderOffset;
+    if (!validElf)
     {
-        const ElfW(Phdr) & ph = info->dlpi_phdr[i];
-        if (ph.p_type != PT_LOAD || ph.p_memsz == 0) continue;
-
-        uintptr_t start = info->dlpi_addr + ph.p_vaddr;
-        uintptr_t end = start + ph.p_memsz;
-        if (ctx->Address >= start && ctx->Address < end)
-        {
-            FillModuleFromPhdr(info, ctx->Result);
-            return ctx->Result ? 1 : 0;
-        }
+        munmap(mappedFile, fileSize);
+        close(fileDescriptor);
+        return false;
     }
-    return 0;
-}
 
-// Checks executable ELF load segments for one address
-int FindExecutableAddressCallback(dl_phdr_info* info, size_t, void* data)
-{
-    auto* ctx = static_cast<FindExecutableAddressCtx*>(data);
-    for (int i = 0; i < info->dlpi_phnum; ++i)
+    auto* programHeaders = reinterpret_cast<ElfW(Phdr)*>(static_cast<unsigned char*>(mappedFile) + programHeaderOffset);
+    for (int i = 0; i < elfHeader->e_phnum; ++i)
     {
-        const ElfW(Phdr) & ph = info->dlpi_phdr[i];
-        if (ph.p_type != PT_LOAD || ph.p_memsz == 0 || (ph.p_flags & PF_X) == 0) continue;
+        const ElfW(Phdr)& programHeader = programHeaders[i];
+        if (programHeader.p_type != PT_LOAD || programHeader.p_memsz == 0) continue;
 
-        const uintptr_t start = info->dlpi_addr + ph.p_vaddr;
-        const uintptr_t end = start + ph.p_memsz;
-        if (ctx->Address >= start && ctx->Address < end)
-        {
-            ctx->Found = true;
-            return 1;
-        }
+        const uintptr_t address = static_cast<uintptr_t>(linkMap->l_addr + programHeader.p_vaddr);
+        const size_t size = static_cast<size_t>(programHeader.p_memsz);
+        AddSegment(image, address, size);
+        if ((programHeader.p_flags & PF_X) != 0) AddSegment(code, address, size);
     }
-    return 0;
+
+    munmap(mappedFile, fileSize);
+    close(fileDescriptor);
+    return static_cast<bool>(image);
 }
 #endif
 } // namespace
+
+// Opens one game module from its explicit game-relative path.
+CModule::CModule(const char* relativeDirectory, const char* moduleName)
+{
+    if (!relativeDirectory || !moduleName || !moduleName[0]) return;
+
+    const char* gameDirectory = Plat_GetGameDirectory();
+    if (!gameDirectory || !gameDirectory[0]) return;
+
+    m_path = std::string(gameDirectory) + relativeDirectory + kModulePrefix + moduleName + kModuleExtension;
+    m_hModule = dlmount(m_path.c_str());
+    if (!m_hModule) return;
+
+#ifdef _WIN32
+    m_image = ModuleFromHandle(reinterpret_cast<HMODULE>(m_hModule));
+    m_code = ModuleSectionFromHandle(reinterpret_cast<HMODULE>(m_hModule), ".text");
+#else
+    if (!FillModuleFromHandle(static_cast<HINSTANCE>(m_hModule), m_image, m_code))
+    {
+        dlclose(m_hModule);
+        m_hModule = nullptr;
+    }
+#endif
+}
+
+CModule* engine = nullptr;
+CModule* server = nullptr;
+
+// Loads the engine and server modules once for signature resolution.
+void Initialize()
+{
+    if (!engine) engine = new CModule(kRootBin, "engine2");
+    if (!server) server = new CModule(kGameBin, "server");
+}
 
 
 
@@ -354,39 +335,6 @@ std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vec
         }
     }
     return matches;
-}
-
-// Resolves executable code ranges from a loaded module
-ModuleInfo ModuleCodeFromName(const char* moduleName)
-{
-#ifdef _WIN32
-    return ModuleSectionFromHandle(GetModuleHandleA(moduleName), ".text");
-#else
-    FindByNameCtx ctx{};
-    ctx.Name = moduleName;
-    dl_iterate_phdr(FindCodeByNameCallback, &ctx);
-    return ctx.Result;
-#endif
-}
-
-// Resolves the module owning an interface virtual table
-ModuleInfo ModuleFromInterfacePtr(void* interfacePtr)
-{
-    if (!interfacePtr) return {};
-    void* vtable = *reinterpret_cast<void**>(interfacePtr);
-    if (!vtable) return {};
-
-#ifdef _WIN32
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!VirtualQuery(vtable, &mbi, sizeof(mbi))) return {};
-    if (mbi.Type != MEM_IMAGE) return {};
-    return ModuleFromHandle(reinterpret_cast<HMODULE>(mbi.AllocationBase));
-#else
-    FindByAddressCtx ctx{};
-    ctx.Address = reinterpret_cast<uintptr_t>(vtable);
-    dl_iterate_phdr(FindByAddressCallback, &ctx);
-    return ctx.Result;
-#endif
 }
 
 // Resolves a polymorphic class vtable from platform RTTI records
@@ -487,10 +435,25 @@ bool IsExecutableAddress(const void* address)
     return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ || protection == PAGE_EXECUTE_READWRITE ||
            protection == PAGE_EXECUTE_WRITECOPY;
 #else
-    FindExecutableAddressCtx ctx{};
-    ctx.Address = reinterpret_cast<uintptr_t>(address);
-    dl_iterate_phdr(FindExecutableAddressCallback, &ctx);
-    return ctx.Found;
+    FILE* maps = std::fopen("/proc/self/maps", "r");
+    if (!maps) return false;
+
+    const uintptr_t target = reinterpret_cast<uintptr_t>(address);
+    char line[512] = {};
+    uintptr_t start = 0;
+    uintptr_t end = 0;
+    char permissions[5] = {};
+    while (std::fgets(line, sizeof(line), maps))
+    {
+        if (std::sscanf(line, "%lx-%lx %4s", &start, &end, permissions) == 3 && target >= start && target < end)
+        {
+            std::fclose(maps);
+            return permissions[2] == 'x';
+        }
+    }
+
+    std::fclose(maps);
+    return false;
 #endif
 }
 

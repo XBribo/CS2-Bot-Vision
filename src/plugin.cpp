@@ -13,10 +13,12 @@
 #include <convar.h>
 #include <tier0/dbg.h>
 #include <interfaces/interfaces.h>
+#include <schemasystem/schemasystem.h>
 
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
 #include "core/gameconfig.h"
+#include "core/cs2_sdk/schema.h"
 #include "utils/memory.h"
 #include "utils/platform.h"
 
@@ -42,6 +44,12 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
         BV_LOG_ERROR("%s", error);
         log::Close();
         return false;
+    }
+
+    g_schemaSystem = static_cast<ISchemaSystem*>(ismm->VInterfaceMatch(ismm->GetEngineFactory(), SCHEMASYSTEM_INTERFACE_VERSION, 0));
+    if (!g_schemaSystem)
+    {
+        BV_LOG_WARN("SchemaSystem unavailable; schema-dependent features disabled");
     }
 
 #ifndef _WIN32
@@ -70,15 +78,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     }
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
 
-    void* serverIface = ismm->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr);
-    if (!serverIface)
-    {
-        std::snprintf(error, maxlen, "Failed to get IServerGameDLL");
-        BV_LOG_ERROR("%s", error);
-        log::Close();
-        return false;
-    }
-
     std::string gamedataPath = cs2bv::gameconfig::ComputePath();
     if (gamedataPath.empty())
     {
@@ -88,7 +87,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
         return false;
     }
 
-    if (!cs2bv::bot_vision::Install(gamedataPath, serverIface, error, maxlen))
+    if (!cs2bv::bot_vision::Install(gamedataPath, error, maxlen))
     {
         BV_LOG_ERROR("%s", error);
         log::Close();

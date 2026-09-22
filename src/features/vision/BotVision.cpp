@@ -22,7 +22,7 @@
 
 namespace cs2bv::bot_vision {
 // Loads gamedata and installs the required and optional modules
-bool Install(const std::string& gamedataPath, void* serverInterface, char* error, size_t maxLength)
+bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 {
     nlohmann::json gamedata;
     if (!gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
@@ -37,15 +37,17 @@ bool Install(const std::string& gamedataPath, void* serverInterface, char* error
 
     config::LoadStartupConfig(gamedataPath);
 
-    modules::ModuleInfo serverModule = modules::ModuleFromInterfacePtr(serverInterface);
-    if (!serverModule)
+    modules::Initialize();
+    if (!modules::server || !modules::server->Image())
     {
         if (error && maxLength > 0)
         {
-            std::snprintf(error, maxLength, "could not resolve CS2 server module from interface ptr=%p", serverInterface);
+            std::snprintf(error, maxLength, "could not open CS2 server module at '%s'", modules::server ? modules::server->Path() : "");
         }
         return false;
     }
+
+    const modules::ModuleInfo& serverModule = modules::server->Image();
 
     if (!schema::Init())
     {

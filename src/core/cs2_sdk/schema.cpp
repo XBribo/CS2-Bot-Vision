@@ -5,66 +5,15 @@
 #include <schemasystem/schemasystem.h>
 #include <schemasystem/schematypes.h>
 
-#ifdef _WIN32
-#include <Windows.h> // NOLINT(misc-include-cleaner)
-#include <libloaderapi.h>
-#include <minwindef.h>
-#else
-#include <dlfcn.h>
-#include <link.h>
-#endif
-
 #include <cstring>
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 
-namespace cs2bv::schema {
-using CreateIfaceFn = void* (*)(const char*, int*);
-
-namespace {
 ISchemaSystem* g_schemaSystem = nullptr;
+
+namespace cs2bv::schema {
+namespace {
 std::unordered_map<std::string, int> g_offsetCache; // NOLINT(bugprone-throwing-static-initialization)
-
-#ifndef _WIN32
-// Returns the final component of a Unix path
-const char* BaseName(const char* path)
-{
-    if (!path) return "";
-    const char* slash = std::strrchr(path, '/');
-    return slash ? slash + 1 : path;
-}
-
-struct FindModuleContext
-{
-    const char* name = nullptr;
-    const char* path = nullptr;
-};
-
-// Finds the full path of one loaded ELF module
-int FindModuleCallback(dl_phdr_info* info, size_t, void* data)
-{
-    auto* context = static_cast<FindModuleContext*>(data);
-    if (info->dlpi_name && std::strcmp(BaseName(info->dlpi_name), context->name) == 0)
-    {
-        context->path = info->dlpi_name;
-        return 1;
-    }
-    return 0;
-}
-
-// Opens one already loaded ELF module without loading another copy
-void* OpenLoadedModule(const char* moduleName)
-{
-    void* module = dlopen(moduleName, RTLD_NOW | RTLD_NOLOAD);
-    if (module) return module;
-
-    FindModuleContext context{};
-    context.name = moduleName;
-    dl_iterate_phdr(FindModuleCallback, &context);
-    return context.path && context.path[0] ? dlopen(context.path, RTLD_NOW | RTLD_NOLOAD) : nullptr;
-}
-#endif
 
 // Finds one class in the server or global schema scope
 CSchemaClassInfo* FindClass(const char* className)
@@ -107,23 +56,9 @@ int FindFieldOffset(const CSchemaClassInfo* classInfo, const char* fieldName, in
 }
 } // namespace
 
-// Resolves ISchemaSystem from the already loaded schemasystem module
+// Uses the ISchemaSystem acquired from the engine factory.
 bool Init()
 {
-    if (g_schemaSystem) return true;
-
-#ifdef _WIN32
-    HMODULE module = GetModuleHandleA("schemasystem.dll");
-    if (!module) return false;
-    auto createInterface = reinterpret_cast<CreateIfaceFn>(GetProcAddress(module, "CreateInterface"));
-#else
-    void* module = OpenLoadedModule("libschemasystem.so");
-    if (!module) return false;
-    auto createInterface = reinterpret_cast<CreateIfaceFn>(dlsym(module, "CreateInterface"));
-#endif
-    if (!createInterface) return false;
-
-    g_schemaSystem = static_cast<ISchemaSystem*>(createInterface(SCHEMASYSTEM_INTERFACE_VERSION, nullptr));
     return g_schemaSystem != nullptr;
 }
 

@@ -8,7 +8,7 @@
 
 namespace cs2bv::bot_vision {
 // Loads gamedata and installs all vision modules
-bool Install(const std::string& gamedataPath, void* serverInterface, char* error = nullptr, size_t maxLength = 0);
+bool Install(const std::string& gamedataPath, char* error = nullptr, size_t maxLength = 0);
 
 // Removes all installed vision modules
 void Remove();
