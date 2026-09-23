@@ -5,6 +5,7 @@
 #include "SmokeVision.h"
 
 #include "features/bullet/BulletVision.h"
+#include "features/door/DoorVision.h"
 #include "features/he/HeVision.h"
 #include "hooks.h"
 #include "memory.h"
@@ -62,7 +63,17 @@ std::atomic<uint64_t> g_lastPawnPointer{ 0 };
 std::atomic<uint64_t> g_revealMask{ 0 };
 std::atomic<unsigned int> g_revealHandles[kMaxBots];
 thread_local bool g_currentPlayerRevealed = false;
-thread_local std::vector<int> g_thresholdFrames;
+struct VisibilityFrame
+{
+    int thresholdMilli;
+    const void* position;
+    CEntityInstance* ignore;
+    float from[3]{};
+    float to[3]{};
+    bool lineReady = false;
+};
+
+thread_local std::vector<VisibilityFrame> g_visibilityFrames;
 thread_local std::vector<bool> g_revealFrames;
 
 struct BotThresholdCacheEntry
@@ -339,7 +350,8 @@ int CachedThresholdFromBot(int64_t bot)
 KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t position, char testFov, void* entity) noexcept
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
-    g_thresholdFrames.push_back(g_currentBotThresholdMilli);
+    g_visibilityFrames.push_back({ g_currentBotThresholdMilli, reinterpret_cast<const void*>(position),
+                                   static_cast<CEntityInstance*>(entity) });
     if (g_smokeMode.load(std::memory_order_relaxed) == 1 || g_botThresholdOverrideCount.load(std::memory_order_relaxed) == 0)
     {
         return { KHook::Action::Ignore };
@@ -349,11 +361,16 @@ KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t position, char t
     return { KHook::Action::Ignore };
 }
 
-// Restores the enclosing invocation's threshold without changing its return value.
+// Restores the enclosing threshold and rejects otherwise visible points behind door geometry.
 KHook::Return<int64_t> IsVisiblePosPost(int64_t, int64_t, char, void*) noexcept
 {
-    g_currentBotThresholdMilli = g_thresholdFrames.back();
-    g_thresholdFrames.pop_back();
+    const VisibilityFrame frame = g_visibilityFrames.back();
+    g_currentBotThresholdMilli = frame.thresholdMilli;
+    g_visibilityFrames.pop_back();
+    if (frame.lineReady && KHook::GetCurrentReturn<int64_t>() != 0 && door_vision::IsLineBlocked(frame.from, frame.to, frame.ignore))
+    {
+        return { KHook::Action::Supersede, 0 };
+    }
     return { KHook::Action::Ignore };
 }
 
@@ -378,6 +395,12 @@ KHook::Return<bool> IsVisiblePlayerPost(int64_t, void*, char, unsigned char*) no
 KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to) noexcept
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
+    // Capture the native eye-to-sample segment even in legacy smoke mode or target reveal.
+    if (door_vision::IsReady() && !g_visibilityFrames.empty() && g_visibilityFrames.back().position == to)
+    {
+        auto& frame = g_visibilityFrames.back();
+        frame.lineReady = memory::ReadPair(from, 0, frame.from, to, 0, frame.to, memory::FailureDomain::Bot);
+    }
     if (g_currentPlayerRevealed) return { KHook::Action::Supersede, true };
 
     if (!IsVolumeMode() || !from || !to || !g_getSmokeDensityInLine)
@@ -472,7 +495,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
         if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "required offset unavailable";
         else if (visibleTarget)
             reason = "KHook error";
-        BV_LOG_WARN("IsVisiblePos hook failed (%s); per-bot density disabled", reason);
+        BV_LOG_WARN("IsVisiblePos hook failed (%s); per-bot density and door vision disabled", reason);
     }
 
     char visiblePlayerError[256] = { 0 };

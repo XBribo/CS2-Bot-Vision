@@ -160,6 +160,7 @@ add_library(
     BotVision SHARED
     src/plugin.cpp
     src/features/vision/BotVision.cpp
+    src/features/door/DoorVision.cpp
     src/features/smoke/SmokeVision.cpp
     src/features/he/HeVision.cpp
     src/features/bullet/BulletVision.cpp

@@ -55,6 +55,9 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
                                    cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetActiveBlastCount());
     cs2bv::commands::PrintToCaller(context, "[BotVision] bulletHoles=%d\n",
                                    cs2bv::bot_vision::GetActiveBulletHoleCount());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] doors: %s blocked=%lld\n",
+                                   cs2bv::bot_vision::IsDoorVisionActive() ? "active" : "unavailable",
+                                   cs2bv::bot_vision::GetDoorBlockedCount());
 }
 
 // Tests smoke density along an explicit line

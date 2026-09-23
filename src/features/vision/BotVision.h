@@ -144,4 +144,10 @@ unsigned int GetRevealHandle(int slot);
 
 // Reports whether the player visibility hook is active
 bool IsVisiblePlayerHooked();
+
+// Reports whether the door geometry correction is available.
+bool IsDoorVisionActive();
+
+// Returns the door-blocked sight-line count.
+int64_t GetDoorBlockedCount();
 } // namespace cs2bv::bot_vision
