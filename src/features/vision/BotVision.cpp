@@ -6,7 +6,6 @@
 #include "BotVision.h"
 
 #include "features/bullet/BulletVision.h"
-#include "features/door/DoorVision.h"
 #include "features/he/HeVision.h"
 #include "features/smoke/SmokeVision.h"
 #include "game_time.h"
@@ -57,7 +56,6 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 
     if (!smoke_vision::Install(gamedata, serverModule, error, maxLength)) return false;
 
-    door_vision::Install(gamedata, serverModule);
     he_vision::Install(gamedata, serverModule);
     bullet_vision::Install(gamedata, serverModule);
     return true;
@@ -69,7 +67,6 @@ void Remove()
     bullet_vision::Remove();
     he_vision::Remove();
     smoke_vision::Remove();
-    door_vision::Remove();
 
     BV_LOG_DEBUG("Removed: hits=%lld blocked=%lld", GetHitCount(), GetBlockedCount());
 }
@@ -208,10 +205,4 @@ unsigned int GetRevealHandle(int slot) { return smoke_vision::GetRevealHandle(sl
 
 // Checks whether player visibility is hooked
 bool IsVisiblePlayerHooked() { return smoke_vision::IsVisiblePlayerHooked(); }
-
-// Reports whether both the native trace and bot visibility hook are available.
-bool IsDoorVisionActive() { return door_vision::IsReady() && smoke_vision::IsVisiblePosHooked(); }
-
-// Returns the number of otherwise visible sight lines rejected by doors.
-int64_t GetDoorBlockedCount() { return door_vision::GetBlockedCount(); }
 } // namespace cs2bv::bot_vision
