@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <span>
 #include <utility>
@@ -284,10 +285,11 @@ KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float star
     if (result.pelletDepth == 0 || result.pelletDepth != g_pelletFrames.size()) return { KHook::Action::Ignore };
 
     PelletFrame& frame = g_pelletFrames.back();
-    if (!frame.captureRequested || frame.traceReady) return { KHook::Action::Ignore };
-    frame.traceReady = memory::ReadPair(result.trace, kNativeTraceStartOffset, frame.source,
-                                      result.trace, kNativeTraceEndOffset, frame.end, memory::FailureDomain::Bullet) &&
-                       ValidPellet(frame.source, frame.end);
+    if (!frame.captureRequested || frame.traceReady || !result.trace) return { KHook::Action::Ignore };
+    const auto* traceBytes = static_cast<const unsigned char*>(result.trace);
+    std::memcpy(frame.source, traceBytes + kNativeTraceStartOffset, sizeof(frame.source));
+    std::memcpy(frame.end, traceBytes + kNativeTraceEndOffset, sizeof(frame.end));
+    frame.traceReady = ValidPellet(frame.source, frame.end);
     return { KHook::Action::Ignore };
 }
 

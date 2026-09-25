@@ -95,32 +95,6 @@ bool Initialize(char* error, size_t maxLength)
 }
 #endif
 
-// Batches independent reads without retaining addresses or page permissions.
-bool ReadPairBytes(const void* first, void* firstOut, size_t firstSize, const void* second, void* secondOut, size_t secondSize)
-{
-    if (!first || !second || !firstOut || !secondOut || firstSize == 0 || secondSize == 0 ||
-        firstSize > UINTPTR_MAX - reinterpret_cast<uintptr_t>(first) ||
-        secondSize > UINTPTR_MAX - reinterpret_cast<uintptr_t>(second) || secondSize > SIZE_MAX - firstSize)
-        return false;
-#ifdef _WIN32
-    uintptr_t regionStart = 0;
-    uintptr_t regionEnd = 0;
-    if (!IsReadableRange(first, firstSize, regionStart, regionEnd) || !IsReadableRange(second, secondSize, regionStart, regionEnd))
-        return false;
-    std::memcpy(firstOut, first, firstSize);
-    std::memcpy(secondOut, second, secondSize);
-    return true;
-#else
-    static const pid_t selfPid = getpid();
-    iovec local[2] = { { firstOut, firstSize }, { secondOut, secondSize } };
-    iovec remote[2] = { { const_cast<void*>(first), firstSize }, { const_cast<void*>(second), secondSize } };
-    const ssize_t copied = process_vm_readv(selfPid, local, 2, remote, 2, 0);
-    if (copied >= 0 && static_cast<size_t>(copied) == firstSize + secondSize) return true;
-    g_lastReadError.store(copied < 0 ? errno : EFAULT, std::memory_order_relaxed);
-    return false;
-#endif
-}
-
 // Checks every virtual-memory region covered by an address range
 bool IsReadable(const void* address, size_t size)
 {
