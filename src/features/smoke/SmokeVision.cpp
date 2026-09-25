@@ -233,10 +233,10 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     }
 
     void* target = ResolveRipRelative(static_cast<unsigned char*>(site), relativeOffset, instructionLength);
-    if (!target)
+    if (!target || !memory::IsReadable(target, sizeof(void*)))
     {
         g_hookedStatus = "rel32_failed";
-        BV_LOG_WARN("AutoList rel32 resolve failed");
+        BV_LOG_WARN("AutoList rel32 target unavailable");
         return;
     }
 
@@ -384,13 +384,12 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
     {
         return { KHook::Action::Ignore };
     }
+    if (g_autoListHead && !*g_autoListHead) return { KHook::Action::Supersede, true };
 
     float fromValues[3]{};
     float toValues[3]{};
-    if (!memory::ReadPair(from, 0, fromValues, to, 0, toValues, memory::FailureDomain::Smoke))
-    {
-        return { KHook::Action::Ignore };
-    }
+    std::memcpy(fromValues, from, sizeof(fromValues));
+    std::memcpy(toValues, to, sizeof(toValues));
 
     const float density = g_getSmokeDensityInLine(fromValues, toValues, nullptr);
     int thresholdMilli = g_densityThresholdMilli.load(std::memory_order_relaxed);
@@ -513,12 +512,10 @@ bool IsVolumeMode() { return g_smokeMode.load(std::memory_order_relaxed) == 0; }
 // Checks whether the auto-list pointer is available
 bool AutoListReady() { return g_autoListHead != nullptr; }
 
-// Safely checks whether the smoke auto-list is nonempty
+// Checks the smoke auto-list head validated during installation
 bool HasSmokeProjectiles()
 {
-    void* head = nullptr;
-    return g_autoListHead && memory::Read(static_cast<const void*>(g_autoListHead), 0, head, memory::FailureDomain::Smoke) &&
-           head != nullptr;
+    return g_autoListHead && *g_autoListHead != nullptr;
 }
 
 // Calls the engine density function when available
