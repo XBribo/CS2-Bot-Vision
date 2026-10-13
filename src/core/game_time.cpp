@@ -2,8 +2,8 @@
 
 #include "game_time.h"
 
-#include <eiface.h>
-#include <globalvars.h>
+#include <engine2/ivengineserver2.h>
+#include <engine2/gameshareddefs.h>
 
 namespace cs2bv::game_time {
 namespace {

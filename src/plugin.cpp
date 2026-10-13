@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-#include <eiface.h>
+#include <engine2/ivengineserver2.h>
 #include <icvar.h>
 #include <convar.h>
 #include <tier0/dbg.h>

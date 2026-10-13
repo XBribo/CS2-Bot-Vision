@@ -76,6 +76,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "BotVision requires x64 build (use -A x64).")
 endif()
 
+# Keep the legacy env var name for the s2sdk cs2 checkout.
 set(HL2SDK $ENV{HL2SDKCS2})
 set(MMS $ENV{MMSOURCE_DEV})
 set(PROTO_DIR $ENV{CSGO_PROTO})
@@ -152,8 +153,8 @@ set_target_properties(spdlog PROPERTIES
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
-    ${HL2SDK}/tier1/keyvalues3.cpp
-    ${HL2SDK}/tier1/convar.cpp
+    ${HL2SDK}/tier0_perproject/keyvalues3.cpp
+    ${HL2SDK}/tier0_perproject/convar.cpp
 )
 
 add_library(
@@ -187,6 +188,7 @@ target_include_directories(
     PRIVATE
     src
     src/core
+    src/core/cs2_sdk/metamod
     src/utils
     ${CMAKE_SOURCE_DIR}/libraries
     ${GENERATED_DIR}
