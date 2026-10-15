@@ -390,7 +390,8 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char traceError[256] = { 0 };
-    g_navPhysicsVtable = modules::ResolveVirtualTable(serverModule, "CNavPhysicsInterface", traceError, sizeof(traceError));
+    // RTTI needs data sections; only instruction signatures use the code ranges.
+    g_navPhysicsVtable = modules::ResolveVirtualTable(modules::server->Image(), "CNavPhysicsInterface", traceError, sizeof(traceError));
     const int traceShapeOffset = gameconfig::ResolveOffset(gamedata, kTraceShapeName, -1);
     if (g_navPhysicsVtable && traceShapeOffset >= 0 && traceShapeOffset < 64 &&
         modules::IsExecutableAddress(g_navPhysicsVtable[traceShapeOffset]))

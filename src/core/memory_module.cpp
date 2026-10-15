@@ -7,6 +7,7 @@
 #endif
 
 #include "core/memory_module.h"
+#include <khook.hpp>
 
 #ifdef _WIN32
 #include <Windows.h> // NOLINT(misc-include-cleaner)
@@ -129,6 +130,36 @@ ModuleInfo ModuleSectionFromHandle(HMODULE handle, const char* sectionName)
     }
     return out;
 }
+ModuleInfo ModuleCodeFromHandle(HMODULE handle)
+{
+    ModuleInfo out;
+    if (!handle) return out;
+
+    const ModuleInfo image = ModuleFromHandle(handle);
+    if (!image) return out;
+
+    auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(image.base);
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE || dosHeader->e_lfanew <= 0) return out;
+
+    auto* ntHeader = reinterpret_cast<IMAGE_NT_HEADERS*>(image.base + dosHeader->e_lfanew);
+    if (ntHeader->Signature != IMAGE_NT_SIGNATURE) return out;
+
+    IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(ntHeader);
+    for (WORD i = 0; i < ntHeader->FileHeader.NumberOfSections; ++i, ++section)
+    {
+        if ((section->Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ)) !=
+            (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ)) continue;
+
+        const size_t sectionSize = static_cast<size_t>(section->Misc.VirtualSize);
+        const size_t sectionOffset = static_cast<size_t>(section->VirtualAddress);
+        if (sectionSize == 0 || sectionOffset >= image.size || sectionSize > image.size - sectionOffset) return out;
+
+        out.base = image.base;
+        out.size = image.size;
+        out.segments.push_back({ .base = image.base + sectionOffset, .size = sectionSize });
+    }
+    return out;
+}
 #else
 // Adds one mapped ELF segment and updates the module bounds.
 void AddSegment(ModuleInfo& module, uintptr_t address, size_t size)
@@ -224,7 +255,7 @@ CModule::CModule(const char* relativeDirectory, const char* moduleName)
 
 #ifdef _WIN32
     m_image = ModuleFromHandle(reinterpret_cast<HMODULE>(m_hModule));
-    m_code = ModuleSectionFromHandle(reinterpret_cast<HMODULE>(m_hModule), ".text");
+    m_code = ModuleCodeFromHandle(reinterpret_cast<HMODULE>(m_hModule));
 #else
     if (!FillModuleFromHandle(static_cast<HINSTANCE>(m_hModule), m_image, m_code))
     {
@@ -282,31 +313,45 @@ bool ParseSigString(const std::string& sigStr, std::vector<uint8_t>& outBytes, s
     return !outBytes.empty();
 }
 
-// Finds the first matching byte pattern in module segments
-void* FindPatternIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild)
+// Finds up to two candidates using original KHook bytes.
+std::vector<void*> FindSignatureMatchesIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild)
 {
-    if (!module || pattern.empty() || pattern.size() != wild.size()) return nullptr;
-
-    const size_t plen = pattern.size();
-    for (const ModuleSegment& segment : module.segments)
+    std::vector<void*> matches;
+    if (!module || pattern.empty() || pattern.size() != wild.size() || !KHook::__exported__khook) return matches;
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string signature;
+    for (size_t i = 0; i < pattern.size(); ++i)
     {
-        if (!segment.base || segment.size < plen) continue;
-
-        for (size_t i = 0; i + plen <= segment.size; ++i)
+        if (i) signature += ' ';
+        if (wild[i]) signature += '?';
+        else
         {
-            bool match = true;
-            for (size_t j = 0; j < plen; ++j)
-            {
-                if (!wild[j] && segment.base[i + j] != pattern[j])
-                {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) return segment.base + i;
+            signature += hex[pattern[i] >> 4];
+            signature += hex[pattern[i] & 15];
         }
     }
-    return nullptr;
+    for (const ModuleSegment& segment : module.segments)
+    {
+        if (!segment.base || segment.size < pattern.size()) continue;
+        size_t offset = 0;
+        while (offset <= segment.size - pattern.size())
+        {
+            // KHook's size counts candidate starts, so exclude starts crossing the segment end.
+            auto* match = static_cast<unsigned char*>(KHook::LookupSignature(
+                segment.base + offset, segment.size - offset - pattern.size() + 1, signature.c_str()));
+            if (!match) break;
+            matches.push_back(match);
+            if (matches.size() == 2) return matches; // Enough to reject an ambiguous signature.
+            offset = static_cast<size_t>(match - segment.base) + 1;
+        }
+    }
+    return matches;
+}
+
+void* FindPatternIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild)
+{
+    const auto matches = FindSignatureMatchesIn(module, pattern, wild);
+    return matches.size() == 1 ? matches.front() : nullptr;
 }
 
 // Finds every pattern match in the selected module segments

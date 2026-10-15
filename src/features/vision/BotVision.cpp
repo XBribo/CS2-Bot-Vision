@@ -38,7 +38,7 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
     config::LoadStartupConfig(gamedataPath);
 
     modules::Initialize();
-    if (!modules::server || !modules::server->Image())
+    if (!modules::server || !modules::server->Code())
     {
         if (error && maxLength > 0)
         {
@@ -47,7 +47,7 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
         return false;
     }
 
-    const modules::ModuleInfo& serverModule = modules::server->Image();
+    const modules::ModuleInfo& serverModule = modules::server->Code();
 
     if (!schema::Init())
     {
