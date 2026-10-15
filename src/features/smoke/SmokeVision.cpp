@@ -426,7 +426,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     g_revealMask.store(0, std::memory_order_relaxed);
 
     g_controllerHandleOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_hController");
-    g_playerInBotOffset = gameconfig::ResolveOffset(gamedata, "Bot::m_pPlayer", -1);
+    g_playerInBotOffset = schema::GetFieldOffset("CBot", "m_pPlayer");
 
     char signatureError[256] = { 0 };
     void* target = gameconfig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
