@@ -135,73 +135,6 @@ int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* ke
     return value->get<int>();
 }
 
-// Resolves a signature already replaced by a rel32 detour
-void* ResolveWithDetourFallback(
-    const nlohmann::json& gamedata, const modules::ModuleInfo& module, const char* name, bool& usedFallback, char* error, size_t errorLength)
-{
-    usedFallback = false;
-
-    char primaryError[256] = { 0 };
-    void* target = gameconfig::ResolveSig(gamedata, module, name, primaryError, sizeof(primaryError));
-    if (target) return target;
-
-    const std::string signature = gameconfig::FindPlatformSig(gamedata, name);
-    std::vector<uint8_t> pattern;
-    std::vector<bool> wildcards;
-    constexpr size_t kRel32JumpSize = 5;
-    if (signature.empty() || !modules::ParseSigString(signature, pattern, wildcards) || pattern.size() <= kRel32JumpSize)
-    {
-        if (error && errorLength > 0) std::snprintf(error, errorLength, "%s", primaryError);
-        return nullptr;
-    }
-
-    void* resolved = nullptr;
-    size_t matchCount = 0;
-    const size_t tailSize = pattern.size() - kRel32JumpSize;
-    for (const modules::ModuleSegment& segment : module.segments)
-    {
-        if (!segment.base || segment.size < pattern.size()) continue;
-
-        for (size_t offset = kRel32JumpSize; offset + tailSize <= segment.size; ++offset)
-        {
-            bool matches = true;
-            for (size_t index = 0; index < tailSize; ++index)
-            {
-                const size_t patternIndex = kRel32JumpSize + index;
-                if (!wildcards[patternIndex] && segment.base[offset + index] != pattern[patternIndex])
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            if (!matches) continue;
-
-            unsigned char* candidate = segment.base + offset - kRel32JumpSize;
-            if (candidate[0] != 0xE9) continue;
-
-            int32_t displacement = 0;
-            std::memcpy(&displacement, candidate + 1, sizeof(displacement));
-            void* detourTarget = candidate + kRel32JumpSize + displacement;
-            if (!memory::IsReadable(detourTarget, 1)) continue;
-
-            resolved = candidate;
-            ++matchCount;
-        }
-    }
-
-    if (matchCount == 1)
-    {
-        usedFallback = true;
-        return resolved;
-    }
-
-    if (error && errorLength > 0)
-    {
-        std::snprintf(error, errorLength, "%s; rel32 detour tail matches=%zu", primaryError, matchCount);
-    }
-    return nullptr;
-}
-
 // Resolves the engine smoke projectile auto-list head
 void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
 {
@@ -228,7 +161,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     if (!site)
     {
         g_hookedStatus = "sig_not_found";
-        BV_LOG_WARN("AutoList sig not found");
+        BV_LOG_WARN("AutoList sig missing or ambiguous");
         return;
     }
 
@@ -455,16 +388,11 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char visibleError[256] = { 0 };
-    bool chainedDetour = false;
     void* visibleTarget =
         g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
-            ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePosName, chainedDetour, visibleError, sizeof(visibleError))
+            ? gameconfig::ResolveSig(gamedata, serverModule, kVisiblePosName, visibleError, sizeof(visibleError))
             : nullptr;
-    if (visibleTarget && g_visiblePosHook.Install(visibleTarget, &HookedIsVisiblePos, &IsVisiblePosPost))
-    {
-        (void)chainedDetour;
-    }
-    else
+    if (!visibleTarget || !g_visiblePosHook.Install(visibleTarget, &HookedIsVisiblePos, &IsVisiblePosPost))
     {
         g_visiblePosHook.Remove();
         const char* reason = visibleError;
@@ -475,16 +403,11 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char visiblePlayerError[256] = { 0 };
-    bool chainedPlayerDetour = false;
     void* visiblePlayerTarget = g_controllerHandleOffset >= 0
-                                    ? ResolveWithDetourFallback(gamedata, serverModule, kVisiblePlayerName, chainedPlayerDetour,
+                                    ? gameconfig::ResolveSig(gamedata, serverModule, kVisiblePlayerName,
                                                                 visiblePlayerError, sizeof(visiblePlayerError))
                                     : nullptr;
-    if (visiblePlayerTarget && g_visiblePlayerHook.Install(visiblePlayerTarget, &HookedIsVisiblePlayer, &IsVisiblePlayerPost))
-    {
-        (void)chainedPlayerDetour;
-    }
-    else
+    if (!visiblePlayerTarget || !g_visiblePlayerHook.Install(visiblePlayerTarget, &HookedIsVisiblePlayer, &IsVisiblePlayerPost))
     {
         g_visiblePlayerHook.Remove();
         const char* reason = visiblePlayerError;
