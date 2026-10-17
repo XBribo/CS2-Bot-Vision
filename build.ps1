@@ -75,19 +75,9 @@ function Build-Windows {
 function Build-Linux {
     Write-Step "Linux (WSL: $WslDistro)"
     $SourceWsl = ConvertTo-WslPath $Root
-    $Hl2Wsl = ConvertTo-WslPath $env:HL2SDKCS2
-    $MmsWsl = ConvertTo-WslPath $env:MMSOURCE_DEV
-    $ProtoExport = "unset CSGO_PROTO"
-    if ($env:CSGO_PROTO) {
-        $ProtoWsl = ConvertTo-WslPath $env:CSGO_PROTO
-        $ProtoExport = "export CSGO_PROTO='$ProtoWsl'"
-    }
 
     $Bash = @"
 set -e
-export HL2SDKCS2='$Hl2Wsl'
-export MMSOURCE_DEV='$MmsWsl'
-$ProtoExport
 cmake -S '$SourceWsl' -B ~/bv-build -DCMAKE_BUILD_TYPE=$Config
 cmake --build ~/bv-build -j`$(nproc)
 test -f ~/bv-build/package/addons/BotVision/bin/linuxsteamrt64/BotVision.so

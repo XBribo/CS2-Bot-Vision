@@ -3,6 +3,9 @@
 
 #include <ISmmPlugin.h>
 
+class ISchemaSystem;
+extern ISchemaSystem* g_schemaSystem;
+
 namespace cs2bv {
 
 class BotVisionPlugin : public ISmmPlugin

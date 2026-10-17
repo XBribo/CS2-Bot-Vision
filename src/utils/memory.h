@@ -1,10 +1,10 @@
-// Validated runtime memory reads and diagnostics
-
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
+#include "core/cs2_sdk/src/utils/memory.h"
 
 namespace cs2bv::memory {
 enum class FailureDomain : uint8_t
@@ -18,26 +18,27 @@ enum class FailureDomain : uint8_t
     Count
 };
 
-// Checks whether a complete address range is readable
-bool IsReadable(const void* address, size_t size);
+// Permission snapshots do not guarantee that an object stays alive.
+using cs2_sdk::memory::IsReadable;
 
 #ifndef _WIN32
 // Verifies that kernel-assisted reads are available before installing hooks
 bool Initialize(char* error, size_t maxLength);
-
-// Copies from the process; a failed read may partially fill the destination
-bool ReadBytes(const void* address, void* out, size_t size);
 #endif
 
-// Records one failed read for a runtime subsystem
-void RecordFailure(FailureDomain domain);
+// Retains Linux errno for plugin diagnostics; failure may partially fill out.
+bool ReadBytes(const void* address, void* out, size_t size);
 
-// Formats all runtime read failure counters
+// Records one failed read and optionally its POSIX error for plugin diagnostics.
+void RecordFailure(FailureDomain domain, int posixError = 0);
+
+// Returns a borrowed buffer, overwritten on the next call.
 const char* Diagnostics();
 
 // Reads a complete field and preserves the output on failure
 template <typename T> bool Read(const void* base, size_t offset, T& out, FailureDomain domain)
 {
+    static_assert(std::is_trivially_copyable_v<T>);
     if (!base)
     {
         RecordFailure(domain);
@@ -52,22 +53,14 @@ template <typename T> bool Read(const void* base, size_t offset, T& out, Failure
     }
 
     const void* address = reinterpret_cast<const void*>(baseAddress + offset); // NOLINT(performance-no-int-to-ptr)
-#ifdef _WIN32
-    if (!IsReadable(address, sizeof(T)))
-#else
     unsigned char buffer[sizeof(T)];
     if (!ReadBytes(address, buffer, sizeof(buffer)))
-#endif
     {
         RecordFailure(domain);
         return false;
     }
 
-#ifdef _WIN32
-    std::memcpy(static_cast<void*>(&out), address, sizeof(T));
-#else
     std::memcpy(static_cast<void*>(&out), buffer, sizeof(T));
-#endif
     return true;
 }
 } // namespace cs2bv::memory

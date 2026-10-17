@@ -1,7 +1,6 @@
 #include "core/config.h"
 #include "core/log.h"
-#include "core/gameconfig.h"
-// BotVision module coordinator and public runtime API
+#include "core/cs2_sdk/src/core/gameconfig.h"
 
 #include "BotVision.h"
 
@@ -10,8 +9,9 @@
 #include "features/smoke/SmokeVision.h"
 #include "game_time.h"
 #include "memory.h"
-#include "core/cs2_sdk/schema.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/schema.h"
+#include "plugin.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
@@ -21,11 +21,10 @@
 #include <string>
 
 namespace cs2bv::bot_vision {
-// Loads gamedata and installs the required and optional modules
 bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 {
     nlohmann::json gamedata;
-    if (!gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
+    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
     {
         const char* format = "failed to read/parse gamedata.json at %s";
         if (error && maxLength > 0)
@@ -37,19 +36,20 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 
     config::LoadStartupConfig(gamedataPath);
 
-    modules::Initialize();
-    if (!modules::server || !modules::server->Code())
+    cs2_sdk::modules::Initialize();
+    if (!cs2_sdk::modules::server || !cs2_sdk::modules::server->Code())
     {
         if (error && maxLength > 0)
         {
-            std::snprintf(error, maxLength, "could not open CS2 server module at '%s'", modules::server ? modules::server->Path() : "");
+            std::snprintf(error, maxLength, "could not open CS2 server module at '%s'",
+                          cs2_sdk::modules::server ? cs2_sdk::modules::server->Path() : "");
         }
         return false;
     }
 
-    const modules::ModuleInfo& serverModule = modules::server->Code();
+    const cs2_sdk::modules::ModuleInfo& serverModule = cs2_sdk::modules::server->Code();
 
-    if (!schema::Init())
+    if (!cs2_sdk::schema::Init(g_schemaSystem))
     {
         BV_LOG_WARN("SchemaSystem unavailable; optional features disabled");
     }
@@ -61,7 +61,6 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
     return true;
 }
 
-// Removes modules in reverse dependency order
 void Remove()
 {
     bullet_vision::Remove();
@@ -71,138 +70,94 @@ void Remove()
     BV_LOG_DEBUG("Removed: hits=%lld blocked=%lld", GetHitCount(), GetBlockedCount());
 }
 
-// Stores the engine interface for shared server time
 void SetEngine(void* engine) { game_time::SetEngine(engine); }
 
-// Forwards an HE detonation to HE state
 void OnHeDetonate(float x, float y, float z) { he_vision::OnDetonate(x, y, z); }
 
-// Sets the HE hole radius
 void SetHeRadius(float value) { he_vision::SetRadius(value); }
 
-// Returns the HE hole radius
 float GetHeRadius() { return he_vision::GetRadius(); }
 
-// Sets the HE hole lifetime
 void SetHeDuration(float value) { he_vision::SetDuration(value); }
 
-// Returns the HE hole lifetime
 float GetHeDuration() { return he_vision::GetDuration(); }
 
-// Returns the active HE hole count
 int GetActiveBlastCount() { return he_vision::GetActiveCount(); }
 
-// Stores the legacy HE listener diagnostic
 void SetHeListenerStatus(bool managerResolved, bool listenerAdded) { he_vision::SetListenerStatus(managerResolved, listenerAdded); }
 
-// Returns the HE diagnostic state
 const char* GetHeListenerStatus() { return he_vision::GetListenerStatus(); }
 
-// Forwards a bullet tunnel to bullet state
 void OnBulletHole(const float start[3], const float end[3], float radius) { bullet_vision::OnHole(start, end, radius); }
 
-// Sets the normal bullet tunnel radius
 void SetBulletRadius(float value) { bullet_vision::SetRadius(value); }
 
-// Returns the normal bullet tunnel radius
 float GetBulletRadius() { return bullet_vision::GetRadius(); }
 
-// Sets the shotgun bullet tunnel radius
 void SetBulletRadiusShotgun(float value) { bullet_vision::SetShotgunRadius(value); }
 
-// Returns the shotgun bullet tunnel radius
 float GetBulletRadiusShotgun() { return bullet_vision::GetShotgunRadius(); }
 
-// Sets the bullet tunnel lifetime
 void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
 
-// Returns the bullet tunnel lifetime
 float GetBulletDuration() { return bullet_vision::GetDuration(); }
 
-// Stores the bullet tunnel enabled state
 void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }
 
-// Returns the bullet tunnel enabled state
 bool GetBulletHolesEnabled() { return bullet_vision::GetHolesEnabled(); }
 
-// Returns the active bullet tunnel count
 int GetActiveBulletHoleCount() { return bullet_vision::GetActiveHoleCount(); }
 
-// Returns the smoke hook call count
 int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 
-// Returns the smoke-blocked line count
 int64_t GetBlockedCount() { return smoke_vision::GetBlockedCount(); }
 
-// Checks whether the smoke auto-list was resolved
 bool IsHookedActive() { return smoke_vision::AutoListReady(); }
 
-// Returns the smoke hook diagnostic
 const char* GetHookedStatus() { return smoke_vision::GetHookedStatus(); }
 
-// Forwards a diagnostic smoke density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength)
 {
     return smoke_vision::TestLos(fromX, fromY, fromZ, toX, toY, toZ, buffer, bufferLength);
 }
 
-// Sets the smoke calculation mode
 void SetSmokeMode(int mode) { smoke_vision::SetMode(mode); }
 
-// Returns the smoke calculation mode
 int GetSmokeMode() { return smoke_vision::GetMode(); }
 
-// Sets the global density threshold
 void SetDensityThreshold(float value) { smoke_vision::SetDensityThreshold(value); }
 
-// Returns the global density threshold
 float GetDensityThreshold() { return smoke_vision::GetDensityThreshold(); }
 
-// Checks whether engine density calculation is ready
 bool IsDensityFnResolved() { return smoke_vision::DensityFunctionReady(); }
 
-// Returns validated memory read diagnostics
 const char* GetSafeReadDiag() { return memory::Diagnostics(); }
 
-// Sets or clears a bot-specific density threshold
 void SetBotDensityThreshold(int slot, float value) { smoke_vision::SetBotDensityThreshold(slot, value); }
 
-// Returns one bot-specific density threshold
 float GetBotDensityThreshold(int slot) { return smoke_vision::GetBotDensityThreshold(slot); }
 
-// Returns the supported bot slot count
 int GetMaxBots() { return smoke_vision::GetMaxBots(); }
 
-// Returns the last bot slot observed by the visibility hook
 int GetLastBotSlot() { return smoke_vision::GetLastBotSlot(); }
 
-// Checks whether the per-bot hook is active
 bool IsVisiblePosHooked() { return smoke_vision::IsVisiblePosHooked(); }
 
-// Returns the per-bot hook call count
 int64_t GetIsVisiblePosCalls() { return smoke_vision::GetIsVisiblePosCalls(); }
 
-// Returns the last observed controller handle
 unsigned int GetLastCtrlHandle() { return smoke_vision::GetLastControllerHandle(); }
 
-// Returns the last observed pawn pointer
 uint64_t GetLastPawnPtr() { return smoke_vision::GetLastPawnPointer(); }
 
-// Adds one smoke reveal slot
 void AddRevealSlot(int slot) { smoke_vision::AddRevealSlot(slot); }
 
-// Removes one smoke reveal slot
 void RemoveRevealSlot(int slot) { smoke_vision::RemoveRevealSlot(slot); }
 
-// Clears all smoke reveals
 void ClearReveals() { smoke_vision::ClearReveals(); }
 
-// Returns the configured smoke reveal mask
 uint64_t GetRevealMask() { return smoke_vision::GetRevealMask(); }
 
-// Returns one revealed player handle
 unsigned int GetRevealHandle(int slot) { return smoke_vision::GetRevealHandle(slot); }
 
-// Checks whether player visibility is hooked
 bool IsVisiblePlayerHooked() { return smoke_vision::IsVisiblePlayerHooked(); }
 } // namespace cs2bv::bot_vision

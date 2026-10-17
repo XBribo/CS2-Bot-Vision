@@ -7,10 +7,10 @@
 #include <string>
 
 namespace cs2bv::bot_vision {
-// Loads gamedata and installs all vision modules
+// Smoke hooks are required; HE and bullet hooks may be unavailable.
 bool Install(const std::string& gamedataPath, char* error = nullptr, size_t maxLength = 0);
 
-// Removes all installed vision modules
+// Removes bullet and HE hooks before the smoke hooks they depend on.
 void Remove();
 
 // Stores the engine interface used for server time

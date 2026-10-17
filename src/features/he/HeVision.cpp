@@ -1,16 +1,16 @@
 #include "core/log.h"
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 // HE grenade smoke-hole capture and state
 
 #include "HeVision.h"
 
 #include "features/smoke/SmokeVision.h"
 #include "game_time.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "memory.h"
-#include "platform.h"
-#include "core/cs2_sdk/schema.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/utils/platform.h"
+#include "core/cs2_sdk/src/core/schema.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
@@ -48,7 +48,7 @@ struct HeInfluence
 constexpr const char* kHeDetonateName = "CHEGrenadeProjectile::Detonate";
 constexpr size_t kMaxHeBlasts = 5;
 constexpr int kDensitySlices = 5;
-hooks::NativeHook<int64_t, void*> g_detonateHook;
+cs2_sdk::hooks::NativeHook<int64_t, void*> g_detonateHook;
 
 int g_bodyComponentOffset = -1;
 int g_sceneNodeOffset = -1;
@@ -104,12 +104,14 @@ KHook::Return<int64_t> HookedDetonate(void* self) noexcept
 } // namespace
 
 // Resolves offsets and installs the optional HE detonation hook
-bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
+bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
-    g_bodyComponentOffset = schema::GetFieldOffset("CBaseEntity", "m_CBodyComponent");
-    g_sceneNodeOffset = schema::GetFieldOffset("CBodyComponent", "m_pSceneNode");
-    g_absOriginOffset = schema::GetFieldOffset("CGameSceneNode", "m_vecAbsOrigin");
-    if (g_bodyComponentOffset < 0 || g_sceneNodeOffset < 0 || g_absOriginOffset < 0)
+    const cs2_sdk::schema::FieldBinding fields[] = {
+        { &g_bodyComponentOffset, "CBaseEntity", "m_CBodyComponent" },
+        { &g_sceneNodeOffset, "CBodyComponent", "m_pSceneNode" },
+        { &g_absOriginOffset, "CGameSceneNode", "m_vecAbsOrigin" },
+    };
+    if (!cs2_sdk::schema::ResolveFields(fields))
     {
         BV_LOG_WARN("HE offsets unavailable from schema; HE holes disabled");
         g_listenerStatus = "schema=FAIL";
@@ -117,7 +119,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char error[256] = { 0 };
-    void* target = gameconfig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
+    void* target = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
     if (target && g_detonateHook.Install(target, &HookedDetonate))
     {
         g_listenerStatus = "hook=ok";
@@ -198,9 +200,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         if (end > begin)
         {
             const float recovery = std::pow(SmoothStep((age - recoveryStart) / recoveryLength), 1.8F);
-            influenceStorage[influenceCount++] = {
-                .blast = blast, .impulse = impulse, .recovery = recovery, .begin = begin, .end = end
-            };
+            influenceStorage[influenceCount++] = { .blast = blast, .impulse = impulse, .recovery = recovery, .begin = begin, .end = end };
         }
     }
     g_blasts.resize(writeIndex);

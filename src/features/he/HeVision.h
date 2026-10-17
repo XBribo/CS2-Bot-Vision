@@ -2,7 +2,7 @@
 
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 
@@ -10,7 +10,7 @@ namespace cs2bv::he_vision {
 using DensitySamplerFn = float (*)(const float* from, const float* to);
 
 // Resolves and installs the optional HE detonation hook
-bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule);
+bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule);
 
 // Removes the HE detonation hook and clears runtime state
 void Remove();

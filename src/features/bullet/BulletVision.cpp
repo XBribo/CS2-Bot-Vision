@@ -1,16 +1,17 @@
+#include "core/cs2_sdk/src/utils/rtti.h"
 #include "core/log.h"
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 // Bullet trace capture and temporary smoke tunnels
 
 #include "BulletVision.h"
 
 #include "features/smoke/SmokeVision.h"
 #include "game_time.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "memory.h"
-#include "platform.h"
-#include "core/cs2_sdk/schema.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/utils/platform.h"
+#include "core/cs2_sdk/src/core/schema.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 #include <entity2/entityinstance.h>
 #include <entityhandle.h>
@@ -58,37 +59,37 @@ struct WeaponDefinitionCacheEntry
     int definitionIndex = -1;
 };
 
-using PelletTraceHook = hooks::NativeHook<int64_t,
-                                          int64_t,
+using PelletTraceHook = cs2_sdk::hooks::NativeHook<int64_t,
+                                                   int64_t,
 #ifdef _WIN32
-                                          void*,
+                                                   void*,
 #else
-                                          // SysV passes the by-value Vector in XMM0 (xy) and XMM1 (z).
-                                          double,
-                                          float,
+                                                   // SysV passes the by-value Vector in XMM0 (xy) and XMM1 (z).
+                                                   double,
+                                                   float,
 #endif
-                                          int64_t,
-                                          float,
-                                          float,
-                                          int,
-                                          unsigned char,
-                                          int,
-                                          int,
-                                          float,
-                                          int64_t,
-                                          void*,
-                                          float,
-                                          float,
-                                          int64_t,
-                                          int64_t,
-                                          int,
-                                          int,
-                                          void*,
-                                          int64_t>;
-using PelletResultHook = hooks::NativeHook<int64_t, void*, void*, float, void*>;
-using TraceShapeFn = void(CS2BV_FASTCALL*)(
+                                                   int64_t,
+                                                   float,
+                                                   float,
+                                                   int,
+                                                   unsigned char,
+                                                   int,
+                                                   int,
+                                                   float,
+                                                   int64_t,
+                                                   void*,
+                                                   float,
+                                                   float,
+                                                   int64_t,
+                                                   int64_t,
+                                                   int,
+                                                   int,
+                                                   void*,
+                                                   int64_t>;
+using PelletResultHook = cs2_sdk::hooks::NativeHook<int64_t, void*, void*, float, void*>;
+using TraceShapeFn = void(CS2_SDK_FASTCALL*)(
     const void* self, const Ray_t& ray, const Vector& start, const Vector& end, CTraceFilter* filter, CGameTrace* trace);
-using GetSlotFn = void*(CS2BV_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
+using GetSlotFn = void*(CS2_SDK_FASTCALL*)(void* weaponServices, int slot, unsigned int position);
 
 constexpr const char* kPelletTraceName = "BulletPelletTrace";
 constexpr const char* kPelletResultName = "BulletPelletTraceResult";
@@ -96,8 +97,8 @@ constexpr const char* kTraceShapeName = "CNavPhysicsInterface::TraceShape";
 constexpr const char* kGetSlotName = "CCSPlayer_WeaponServices::GetSlot";
 constexpr size_t kMaxBulletHoles = 16;
 constexpr size_t kWeaponCacheSize = 64;
-constexpr size_t kNativeTraceStartOffset = 0x78;
-constexpr size_t kNativeTraceEndOffset = 0x84;
+constexpr size_t kTraceStartOffset = 0x78;
+constexpr size_t kTraceEndOffset = 0x84;
 constexpr int kDensitySlices = 5;
 
 TraceShapeFn g_traceShape = nullptr;
@@ -218,7 +219,7 @@ int ActiveWeaponDefinition(void* pawn)
     if (!memory::Read(weaponServices, g_activeWeaponOffset, activeHandle, memory::FailureDomain::Weapon)) return -1;
     if (activeHandle == 0U || activeHandle == 0xFFFFFFFFU) return -1;
 
-    const int activeIndex = static_cast<int>(activeHandle & 0x7FFFU);
+    const int activeIndex = CEntityHandle(activeHandle).GetEntryIndex();
     for (int slot = 0; slot <= 4; ++slot)
     {
         const unsigned int maxPosition = slot == 3 ? 8U : 1U;
@@ -287,8 +288,8 @@ KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float star
     PelletFrame& frame = g_pelletFrames.back();
     if (!frame.captureRequested || frame.traceReady || !result.trace) return { KHook::Action::Ignore };
     const auto* traceBytes = static_cast<const unsigned char*>(result.trace);
-    std::memcpy(frame.source, traceBytes + kNativeTraceStartOffset, sizeof(frame.source));
-    std::memcpy(frame.end, traceBytes + kNativeTraceEndOffset, sizeof(frame.end));
+    std::memcpy(frame.source, traceBytes + kTraceStartOffset, sizeof(frame.source));
+    std::memcpy(frame.end, traceBytes + kTraceEndOffset, sizeof(frame.end));
     frame.traceReady = ValidPellet(frame.source, frame.end);
     return { KHook::Action::Ignore };
 }
@@ -377,13 +378,13 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 } // namespace
 
 // Resolves offsets and installs optional bullet capture facilities
-bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
+bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
     // Checks SDK member offsets on a real object without non-standard offsetof.
     const CGameTrace layoutProbe;
     const auto traceAddress = reinterpret_cast<uintptr_t>(&layoutProbe);
-    if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kNativeTraceStartOffset ||
-        reinterpret_cast<uintptr_t>(&layoutProbe.m_vEndPos) - traceAddress != kNativeTraceEndOffset)
+    if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kTraceStartOffset ||
+        reinterpret_cast<uintptr_t>(&layoutProbe.m_vEndPos) - traceAddress != kTraceEndOffset)
     {
         BV_LOG_ERROR("CGameTrace layout changed; bullet capture and HE traces disabled");
         return false;
@@ -391,12 +392,16 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
 
     char traceError[256] = { 0 };
     // RTTI needs data sections; only instruction signatures use the code ranges.
-    g_navPhysicsVtable = modules::ResolveVirtualTable(modules::server->Image(), "CNavPhysicsInterface", traceError, sizeof(traceError));
-    const int traceShapeOffset = gameconfig::ResolveOffset(gamedata, kTraceShapeName, -1);
+    g_navPhysicsVtable =
+        cs2_sdk::rtti::ResolveVirtualTable(cs2_sdk::modules::server->Image(), "CNavPhysicsInterface", traceError, sizeof(traceError));
+    const int traceShapeOffset = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, kTraceShapeName, -1);
+    void* traceShape = nullptr;
     if (g_navPhysicsVtable && traceShapeOffset >= 0 && traceShapeOffset < 64 &&
-        modules::IsExecutableAddress(g_navPhysicsVtable[traceShapeOffset]))
+        memory::Read(g_navPhysicsVtable, static_cast<size_t>(traceShapeOffset) * sizeof(void*), traceShape,
+                     memory::FailureDomain::Install) &&
+        cs2_sdk::memory::IsExecutableAddress(traceShape))
     {
-        g_traceShape = reinterpret_cast<TraceShapeFn>(g_navPhysicsVtable[traceShapeOffset]);
+        g_traceShape = reinterpret_cast<TraceShapeFn>(traceShape);
     }
     else
     {
@@ -407,19 +412,22 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
         BV_LOG_WARN("Native trace unavailable (%s); HE smoke holes disabled", reason);
     }
 
-    g_weaponServicesOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_pWeaponServices");
-    g_activeWeaponOffset = schema::GetFieldOffset("CPlayer_WeaponServices", "m_hActiveWeapon");
-    const int attributeManagerOffset = schema::GetFieldOffset("CBasePlayerWeapon", "m_AttributeManager");
-    const int itemOffset = schema::GetFieldOffset("CAttributeContainer", "m_Item");
-    const int definitionIndexOffset = schema::GetFieldOffset("CEconItemView", "m_iItemDefinitionIndex");
-    g_itemDefinitionIndexOffset = attributeManagerOffset >= 0 && itemOffset >= 0 && definitionIndexOffset >= 0
-                                      ? attributeManagerOffset + itemOffset + definitionIndexOffset
-                                      : -1;
+    const cs2_sdk::schema::FieldBinding fields[] = {
+        { &g_weaponServicesOffset, "CBasePlayerPawn", "m_pWeaponServices" },
+        { &g_activeWeaponOffset, "CPlayer_WeaponServices", "m_hActiveWeapon" },
+    };
+    cs2_sdk::schema::ResolveFields(fields);
+    const cs2_sdk::schema::Field itemFields[] = {
+        { "CBasePlayerWeapon", "m_AttributeManager" },
+        { "CAttributeContainer", "m_Item" },
+        { "CEconItemView", "m_iItemDefinitionIndex" },
+    };
+    g_itemDefinitionIndexOffset = cs2_sdk::schema::GetEmbeddedFieldOffset(itemFields);
 
     char pelletError[256] = { 0 };
-    void* pelletTarget = gameconfig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
+    void* pelletTarget = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kPelletTraceName, pelletError, sizeof(pelletError));
     char resultError[256] = { 0 };
-    void* resultTarget = gameconfig::ResolveSig(gamedata, serverModule, kPelletResultName, resultError, sizeof(resultError));
+    void* resultTarget = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kPelletResultName, resultError, sizeof(resultError));
     bool installed = false;
     if (!resultTarget || !g_pelletResultHook.Install(resultTarget, &PelletResultPre, &PelletResultPost))
     {
@@ -438,8 +446,9 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
 
     char getSlotError[256] = { 0 };
     const bool weaponOffsetsReady = g_weaponServicesOffset >= 0 && g_activeWeaponOffset >= 0 && g_itemDefinitionIndexOffset >= 0;
-    void* getSlotTarget =
-        weaponOffsetsReady ? gameconfig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError)) : nullptr;
+    void* getSlotTarget = weaponOffsetsReady
+                              ? cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kGetSlotName, getSlotError, sizeof(getSlotError))
+                              : nullptr;
     if (getSlotTarget)
     {
         g_getSlot = reinterpret_cast<GetSlotFn>(getSlotTarget);
@@ -550,8 +559,7 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         const float distanceSquared = ClosestSegmentParameters(from, to, tunnel.start, tunnel.end, lineAmount, holeAmount);
         if (distanceSquared >= radius * radius) continue;
 
-        const float hole[3] = { tunnel.end[0] - tunnel.start[0], tunnel.end[1] - tunnel.start[1],
-                                tunnel.end[2] - tunnel.start[2] };
+        const float hole[3] = { tunnel.end[0] - tunnel.start[0], tunnel.end[1] - tunnel.start[1], tunnel.end[2] - tunnel.start[2] };
         const float holeLengthSquared = (hole[0] * hole[0]) + (hole[1] * hole[1]) + (hole[2] * hole[2]);
         const float directionDot =
             holeLengthSquared > 0.001F

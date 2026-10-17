@@ -1,5 +1,3 @@
-// Shared access to the current server time
-
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
 namespace cs2bv::game_time {

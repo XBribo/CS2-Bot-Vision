@@ -1,21 +1,23 @@
 #include "core/log.h"
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 // Smoke visibility hooks and per-bot threshold state
 
 #include "SmokeVision.h"
 
 #include "features/bullet/BulletVision.h"
 #include "features/he/HeVision.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "memory.h"
-#include "platform.h"
-#include "core/cs2_sdk/schema.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/utils/platform.h"
+#include "core/cs2_sdk/src/core/schema.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
+#include <entityhandle.h>
 
 #include <atomic>
+#include <cerrno>
 #include <climits>
 #include <cstdarg>
 #include <cstdint>
@@ -27,7 +29,7 @@
 
 namespace cs2bv::smoke_vision {
 namespace {
-using GetSmokeDensityInLineFn = float(CS2BV_FASTCALL*)(const float* from, const float* to, float* outClosest);
+using GetSmokeDensityInLineFn = float(CS2_SDK_FASTCALL*)(const float* from, const float* to, float* outClosest);
 
 constexpr const char* kSmokeFunctionName = "CBotManager::IsVisibleThroughSmoke";
 constexpr const char* kAutoListName = "g_AutoList_SmokeProj_Head_Server";
@@ -38,9 +40,9 @@ constexpr int kMaxBots = 64;
 constexpr int kDefaultThreshold = INT_MIN;
 
 GetSmokeDensityInLineFn g_getSmokeDensityInLine = nullptr;
-hooks::NativeHook<bool, void*, const void*, const void*> g_smokeHook;
-hooks::NativeHook<int64_t, int64_t, int64_t, char, void*> g_visiblePosHook;
-hooks::NativeHook<bool, int64_t, void*, char, unsigned char*> g_visiblePlayerHook;
+cs2_sdk::hooks::NativeHook<bool, void*, const void*, const void*> g_smokeHook;
+cs2_sdk::hooks::NativeHook<int64_t, int64_t, int64_t, char, void*> g_visiblePosHook;
+cs2_sdk::hooks::NativeHook<bool, int64_t, void*, char, unsigned char*> g_visiblePlayerHook;
 void** g_autoListHead = nullptr;
 
 std::atomic<int64_t> g_hitCount{ 0 };
@@ -79,18 +81,18 @@ constexpr unsigned int kCacheRefreshUses = 1024;
 constexpr unsigned int kInvalidCacheRefreshUses = 32;
 thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
-// Calls the resolved native density function for effect modules
-float SampleNativeDensity(const float* from, const float* to)
+// Calls the engine density function for effect modules
+float SampleEngineDensity(const float* from, const float* to)
 {
     return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0F;
 }
 
-// Applies HE and bullet effects to native server density
+// Applies HE and bullet effects to engine density
 float AdjustClientDensity(const float* from, const float* to, float density)
 {
     float adjusted = density;
-    if (bullet_vision::GetHolesEnabled()) adjusted = bullet_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
-    return he_vision::AdjustDensity(from, to, adjusted, &SampleNativeDensity);
+    if (bullet_vision::GetHolesEnabled()) adjusted = bullet_vision::AdjustDensity(from, to, adjusted, &SampleEngineDensity);
+    return he_vision::AdjustDensity(from, to, adjusted, &SampleEngineDensity);
 }
 
 // Returns an install error for the plugin loader to log once.
@@ -118,11 +120,14 @@ uint64_t MixPointerValue(uintptr_t value)
 // Resolves a RIP-relative pointer from a matched instruction
 void* ResolveRipRelative(unsigned char* signatureStart, int relativeOffset, int instructionLength)
 {
-    if (!signatureStart || relativeOffset <= 0 || instructionLength < relativeOffset + 4) return nullptr;
-
-    int32_t displacement = 0;
-    if (!memory::Read(signatureStart, static_cast<size_t>(relativeOffset), displacement, memory::FailureDomain::Install)) return nullptr;
-    return signatureStart + instructionLength + displacement;
+    if (!signatureStart || relativeOffset <= 0 || instructionLength < 4 || relativeOffset > instructionLength - 4) return nullptr;
+#ifndef _WIN32
+    errno = 0;
+#endif
+    void* target = cs2_sdk::memory::ResolveRelativeAddress(signatureStart, static_cast<size_t>(relativeOffset),
+                                                           static_cast<size_t>(instructionLength));
+    if (!target) memory::RecordFailure(memory::FailureDomain::Install, errno ? errno : EFAULT);
+    return target;
 }
 
 // Reads an integer property from one gamedata entry
@@ -136,9 +141,9 @@ int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* ke
 }
 
 // Resolves the engine smoke projectile auto-list head
-void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule)
+void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
-    const std::string signature = gameconfig::FindPlatformSig(gamedata, kAutoListName);
+    const std::string signature = cs2_sdk::gameconfig::FindPlatformSig(gamedata, kAutoListName);
     if (signature.empty())
     {
         g_hookedStatus = "sig_empty";
@@ -150,14 +155,14 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const modules::ModuleIn
     const int instructionLength = GamedataInt(gamedata, kAutoListName, "rel_size", 7);
     std::vector<uint8_t> pattern;
     std::vector<bool> wildcards;
-    if (!modules::ParseSigString(signature, pattern, wildcards))
+    if (!cs2_sdk::modules::ParseSigString(signature, pattern, wildcards))
     {
         g_hookedStatus = "sig_parse_failed";
         BV_LOG_WARN("AutoList sig parse failed");
         return;
     }
 
-    void* site = modules::FindPatternIn(serverModule, pattern, wildcards);
+    void* site = cs2_sdk::modules::FindPatternIn(serverModule, pattern, wildcards);
     if (!site)
     {
         g_hookedStatus = "sig_not_found";
@@ -196,7 +201,7 @@ int BotSlotFromBot(int64_t bot)
     g_lastControllerHandle.store(handle, std::memory_order_relaxed);
     if (handle == 0U || handle == 0xFFFFFFFFU) return -1;
 
-    const int controllerIndex = static_cast<int>(handle & 0x7FFFU);
+    const int controllerIndex = CEntityHandle(handle).GetEntryIndex();
     const int slot = controllerIndex - 1;
     if (slot < 0 || slot >= kMaxBots) return -1;
     g_lastBotSlot.store(slot, std::memory_order_relaxed);
@@ -212,7 +217,7 @@ bool IsRevealedPlayer(void* player, uint64_t revealMask)
     std::memcpy(&handle, static_cast<const unsigned char*>(player) + g_controllerHandleOffset, sizeof(handle));
     if (handle == 0U || handle == 0xFFFFFFFFU) return false;
 
-    const int slot = static_cast<int>(handle & 0x7FFFU) - 1;
+    const int slot = CEntityHandle(handle).GetEntryIndex() - 1;
     if (slot < 0 || slot >= kMaxBots || (revealMask & (1ULL << slot)) == 0)
     {
         return false;
@@ -333,9 +338,9 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
         float bulletDensity = density;
         if (bullet_vision::GetHolesEnabled())
         {
-            bulletDensity = bullet_vision::AdjustDensity(fromValues, toValues, density, &SampleNativeDensity);
+            bulletDensity = bullet_vision::AdjustDensity(fromValues, toValues, density, &SampleEngineDensity);
         }
-        if (he_vision::AdjustDensity(fromValues, toValues, bulletDensity, &SampleNativeDensity) < threshold)
+        if (he_vision::AdjustDensity(fromValues, toValues, bulletDensity, &SampleEngineDensity) < threshold)
             return { KHook::Action::Supersede, true };
 
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
@@ -347,7 +352,7 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
 } // namespace
 
 // Installs required and optional smoke hooks
-bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverModule, char* error, size_t maxLength)
+bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule, char* error, size_t maxLength)
 {
     for (int slot = 0; slot < kMaxBots; ++slot)
     {
@@ -358,11 +363,14 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     g_cacheGeneration.fetch_add(1, std::memory_order_relaxed);
     g_revealMask.store(0, std::memory_order_relaxed);
 
-    g_controllerHandleOffset = schema::GetFieldOffset("CBasePlayerPawn", "m_hController");
-    g_playerInBotOffset = schema::GetFieldOffset("CBot", "m_pPlayer");
+    const cs2_sdk::schema::FieldBinding fields[] = {
+        { &g_controllerHandleOffset, "CBasePlayerPawn", "m_hController" },
+        { &g_playerInBotOffset, "CBot", "m_pPlayer" },
+    };
+    cs2_sdk::schema::ResolveFields(fields);
 
     char signatureError[256] = { 0 };
-    void* target = gameconfig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
+    void* target = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kSmokeFunctionName, signatureError, sizeof(signatureError));
     if (!target)
     {
         ReportError(error, maxLength, "%s", signatureError);
@@ -377,7 +385,7 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char densityError[256] = { 0 };
-    void* densityTarget = gameconfig::ResolveSig(gamedata, serverModule, kDensityFunctionName, densityError, sizeof(densityError));
+    void* densityTarget = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kDensityFunctionName, densityError, sizeof(densityError));
     if (densityTarget)
     {
         g_getSmokeDensityInLine = reinterpret_cast<GetSmokeDensityInLineFn>(densityTarget);
@@ -388,10 +396,9 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char visibleError[256] = { 0 };
-    void* visibleTarget =
-        g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
-            ? gameconfig::ResolveSig(gamedata, serverModule, kVisiblePosName, visibleError, sizeof(visibleError))
-            : nullptr;
+    void* visibleTarget = g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0
+                              ? cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kVisiblePosName, visibleError, sizeof(visibleError))
+                              : nullptr;
     if (!visibleTarget || !g_visiblePosHook.Install(visibleTarget, &HookedIsVisiblePos, &IsVisiblePosPost))
     {
         g_visiblePosHook.Remove();
@@ -403,10 +410,10 @@ bool Install(const nlohmann::json& gamedata, const modules::ModuleInfo& serverMo
     }
 
     char visiblePlayerError[256] = { 0 };
-    void* visiblePlayerTarget = g_controllerHandleOffset >= 0
-                                    ? gameconfig::ResolveSig(gamedata, serverModule, kVisiblePlayerName,
-                                                                visiblePlayerError, sizeof(visiblePlayerError))
-                                    : nullptr;
+    void* visiblePlayerTarget =
+        g_controllerHandleOffset >= 0
+            ? cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kVisiblePlayerName, visiblePlayerError, sizeof(visiblePlayerError))
+            : nullptr;
     if (!visiblePlayerTarget || !g_visiblePlayerHook.Install(visiblePlayerTarget, &HookedIsVisiblePlayer, &IsVisiblePlayerPost))
     {
         g_visiblePlayerHook.Remove();
@@ -436,10 +443,7 @@ bool IsVolumeMode() { return g_smokeMode.load(std::memory_order_relaxed) == 0; }
 bool AutoListReady() { return g_autoListHead != nullptr; }
 
 // Checks the smoke auto-list head validated during installation
-bool HasSmokeProjectiles()
-{
-    return g_autoListHead && *g_autoListHead != nullptr;
-}
+bool HasSmokeProjectiles() { return g_autoListHead && *g_autoListHead != nullptr; }
 
 // Calls the engine density function when available
 float DensityInLine(const float* from, const float* to)

@@ -1,11 +1,8 @@
 #include "core/log.h"
-// BotVision Metamod:Source plugin entry point
-
 #include "plugin.h"
 #include <ISmmPluginExt.h>
 
 #include <cstdio>
-#include <filesystem>
 #include <string>
 
 #include <engine2/ivengineserver2.h>
@@ -17,26 +14,26 @@
 
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
-#include "core/gameconfig.h"
-#include "core/cs2_sdk/schema.h"
+#include "core/gamedata.h"
+#include "core/cs2_sdk/src/core/schema.h"
 #include "utils/memory.h"
-#include "utils/platform.h"
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
 #define BUILD_TIMESTAMP __DATE__ " " __TIME__
 
 PLUGIN_EXPOSE(cs2bv::BotVisionPlugin, cs2bv::g_plugin);
 
+ISchemaSystem* g_schemaSystem = nullptr;
+
 namespace cs2bv {
 
 BotVisionPlugin g_plugin;
 
-// Loads engine interfaces and installs the coordinated modules
 bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool /*late*/)
 {
     PLUGIN_SAVEVARS();
 
-    if (!log::Init(ismm->GetBaseDir(), error, maxlen)) return false;
+    if (!log::Init(ismm->GetBaseDir(), "BotVision", error, maxlen)) return false;
 
     if (!KHook::__exported__khook)
     {
@@ -78,7 +75,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     }
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
 
-    std::string gamedataPath = cs2bv::gameconfig::ComputePath();
+    std::string gamedataPath = cs2bv::gamedata::ComputePath();
     if (gamedataPath.empty())
     {
         std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
@@ -102,7 +99,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     return true;
 }
 
-// Removes commands, hooks, and acquired engine state
 bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
     cs2bv::commands::Unregister();
@@ -111,30 +107,22 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     g_pCVar = nullptr;
     cs2bv::commands::g_engine = nullptr;
     cs2bv::bot_vision::SetEngine(nullptr);
+    cs2_sdk::schema::Reset();
+    g_schemaSystem = nullptr;
     BV_LOG_INFO("Unloaded");
     log::Close();
     return true;
 }
 
-// Accepts a plugin pause request.
 bool BotVisionPlugin::Pause(char*, size_t) { return true; }
-// Accepts a plugin resume request.
 bool BotVisionPlugin::Unpause(char*, size_t) { return true; }
-// Returns plugin author metadata.
 const char* BotVisionPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
-// Returns the plugin name.
 const char* BotVisionPlugin::GetName() { return "BotVision"; }
-// Returns the plugin description.
 const char* BotVisionPlugin::GetDescription() { return "Volumetric smoke bots."; }
-// Returns the plugin project URL.
 const char* BotVisionPlugin::GetURL() { return "https://github.com/XBribo/CS2-Bot-Vision"; }
-// Returns the plugin license.
 const char* BotVisionPlugin::GetLicense() { return "AGPL3.0"; }
-// Returns the version supplied by the build.
 const char* BotVisionPlugin::GetVersion() { return VERSION_STRING; }
-// Returns the compilation date and time.
 const char* BotVisionPlugin::GetDate() { return BUILD_TIMESTAMP; }
-// Returns the plugin log tag.
 const char* BotVisionPlugin::GetLogTag() { return "BV"; }
 
 } // namespace cs2bv
