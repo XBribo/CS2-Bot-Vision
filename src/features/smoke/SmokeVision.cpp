@@ -86,6 +86,9 @@ constexpr unsigned int kCacheRefreshUses = 1024;
 constexpr unsigned int kInvalidCacheRefreshUses = 32;
 thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
+// Zero density never blocks sight.
+bool BlocksSight(float density, float threshold) { return density > 0.0F && density >= threshold; }
+
 // Integrates the strongest hole mask once per slice.
 float AdjustClientDensity(const float* from, const float* to, float density)
 {
@@ -383,14 +386,10 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
     int thresholdMilli = g_densityThresholdMilli.load(std::memory_order_relaxed);
     if (g_currentBotThresholdMilli != kDefaultThreshold) thresholdMilli = g_currentBotThresholdMilli;
     const float threshold = thresholdMilli * 0.001F;
-    if (density >= threshold)
-    {
-        if (AdjustClientDensity(fromValues, toValues, density) < threshold) return { KHook::Action::Supersede, true };
-
-        g_blockedCount.fetch_add(1, std::memory_order_relaxed);
-        return { KHook::Action::Supersede, false };
-    }
-    return { KHook::Action::Supersede, true };
+    const float adjustedDensity = BlocksSight(density, threshold) ? AdjustClientDensity(fromValues, toValues, density) : density;
+    const bool blocked = BlocksSight(adjustedDensity, threshold);
+    if (blocked) g_blockedCount.fetch_add(1, std::memory_order_relaxed);
+    return { KHook::Action::Supersede, !blocked };
 }
 
 } // namespace
@@ -657,8 +656,8 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
     const float density = g_getSmokeDensityInLine(from, to, nullptr);
     const float adjustedDensity = AdjustClientDensity(from, to, density);
     const float threshold = GetDensityThreshold();
-    const bool engineBlocked = density >= threshold;
-    const bool blocked = adjustedDensity >= threshold;
+    const bool engineBlocked = BlocksSight(density, threshold);
+    const bool blocked = BlocksSight(adjustedDensity, threshold);
     written += std::snprintf(buffer + written, bufferLength - written,
                              "density=%.4f adjusted=%.4f threshold=%.4f engineBlock=%d blocked=%d activeHe=%d activeBullets=%d\n", density,
                              adjustedDensity, threshold, engineBlocked ? 1 : 0, blocked ? 1 : 0, he_vision::GetActiveCount(),
