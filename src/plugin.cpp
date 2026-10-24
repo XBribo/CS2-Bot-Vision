@@ -67,10 +67,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 #endif
 
     commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
-    if (!commands::g_engine)
-    {
-        BV_LOG_WARN("Client replies disabled: engine unavailable");
-    }
+    if (!commands::g_engine) return fail("IVEngineServer2 unavailable");
     bot_vision::SetEngine(commands::g_engine);
 
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
