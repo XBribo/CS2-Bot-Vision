@@ -15,10 +15,6 @@ class BotVisionPlugin : public ISmmPlugin
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
     // Removes hooks and releases vision state.
     bool Unload(char* error, size_t maxlen) override;
-    // Accepts a plugin pause request.
-    bool Pause(char* error, size_t maxlen) override;
-    // Accepts a plugin resume request.
-    bool Unpause(char* error, size_t maxlen) override;
 
     // Returns plugin author metadata.
     const char* GetAuthor() override;

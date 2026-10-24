@@ -95,8 +95,6 @@ bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     return true;
 }
 
-bool BotVisionPlugin::Pause(char*, size_t) { return true; }
-bool BotVisionPlugin::Unpause(char*, size_t) { return true; }
 const char* BotVisionPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
 const char* BotVisionPlugin::GetName() { return "BotVision"; }
 const char* BotVisionPlugin::GetDescription() { return "Volumetric smoke bots."; }
