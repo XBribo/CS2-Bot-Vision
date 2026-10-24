@@ -24,7 +24,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -32,7 +31,6 @@
 #include <cstring>
 #include <mutex>
 #include <span>
-#include <utility>
 #include <vector>
 
 namespace cs2bv::bullet_vision {
@@ -43,13 +41,6 @@ struct BulletHole
     float end[3];
     float startTime;
     float radius;
-};
-
-struct BulletInfluence
-{
-    BulletHole hole;
-    float begin;
-    float end;
 };
 
 struct WeaponDefinitionCacheEntry
@@ -95,11 +86,9 @@ constexpr const char* kPelletTraceName = "BulletPelletTrace";
 constexpr const char* kPelletResultName = "BulletPelletTraceResult";
 constexpr const char* kTraceShapeName = "CNavPhysicsInterface::TraceShape";
 constexpr const char* kGetSlotName = "CCSPlayer_WeaponServices::GetSlot";
-constexpr size_t kMaxBulletHoles = 16;
 constexpr size_t kWeaponCacheSize = 64;
 constexpr size_t kTraceStartOffset = 0x78;
 constexpr size_t kTraceEndOffset = 0x84;
-constexpr int kDensitySlices = 5;
 
 TraceShapeFn g_traceShape = nullptr;
 GetSlotFn g_getSlot = nullptr;
@@ -492,7 +481,7 @@ void OnHole(const float start[3], const float end[3], float radius)
 {
     const float time = game_time::Now();
     std::scoped_lock lock(g_holeMutex);
-    if (g_holes.size() < kMaxBulletHoles)
+    if (g_holes.size() < kMaxInfluences)
     {
         BulletHole hole{};
         for (int index = 0; index < 3; ++index)
@@ -520,20 +509,18 @@ void OnHole(const float start[3], const float end[3], float radius)
     g_holes[oldest].radius = radius;
 }
 
-// Applies active bullet records to native density near each tunnel
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler)
+// Collects active tunnels along a line.
+size_t CollectInfluences(const float* from, const float* to, float now, std::span<Influence, kMaxInfluences> influences)
 {
     const float duration = GetDuration();
-    if (!from || !to || !sampler || density <= 0.0F || duration <= 0.0F) return density;
+    if (duration <= 0.0F) return 0;
 
     const float line[3] = { to[0] - from[0], to[1] - from[1], to[2] - from[2] };
     const float lineLengthSquared = (line[0] * line[0]) + (line[1] * line[1]) + (line[2] * line[2]);
-    if (lineLengthSquared <= 0.001F) return density;
+    if (lineLengthSquared <= 0.001F) return 0;
     const float lineLength = std::sqrt(lineLengthSquared);
 
-    const float now = game_time::Now();
     std::scoped_lock lock(g_holeMutex);
-    std::array<BulletInfluence, kMaxBulletHoles> influenceStorage;
     size_t influenceCount = 0;
     size_t writeIndex = 0;
     for (size_t index = 0; index < g_holes.size(); ++index)
@@ -547,7 +534,6 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         if (radius <= 0.0F) continue;
 
         BulletHole tunnel = holeRecord;
-        tunnel.radius = radius;
         const float travelAmount = std::min(age * 10.0F, 1.0F);
         for (int axis = 0; axis < 3; ++axis)
         {
@@ -587,72 +573,24 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
             end = Saturate(lineAmount + halfAmount);
         }
 
-        if (end > begin) influenceStorage[influenceCount++] = { .hole = tunnel, .begin = begin, .end = end };
+        if (end > begin)
+        {
+            influences[influenceCount++] = { .start = { tunnel.start[0], tunnel.start[1], tunnel.start[2] },
+                                             .end = { tunnel.end[0], tunnel.end[1], tunnel.end[2] },
+                                             .radius = radius,
+                                             .begin = begin,
+                                             .finish = end };
+        }
     }
     g_holes.resize(writeIndex);
-    const std::span influences(influenceStorage.data(), influenceCount);
-    if (influences.empty()) return density;
+    return influenceCount;
+}
 
-    std::ranges::sort(influences, [](const BulletInfluence& left, const BulletInfluence& right) {
-        return left.begin < right.begin;
-    });
-
-    std::array<std::pair<float, float>, kMaxBulletHoles> intervalStorage;
-    size_t intervalCount = 0;
-    for (const BulletInfluence& influence : influences)
-    {
-        if (intervalCount == 0 || influence.begin > intervalStorage[intervalCount - 1].second + 0.0001F)
-        {
-            intervalStorage[intervalCount++] = { influence.begin, influence.end };
-        }
-        else
-        {
-            intervalStorage[intervalCount - 1].second = std::max(intervalStorage[intervalCount - 1].second, influence.end);
-        }
-    }
-
-    float sampledDensity = 0.0F;
-    float weightedDensity = 0.0F;
-    for (const std::pair<float, float>& interval : std::span(intervalStorage.data(), intervalCount))
-    {
-        for (int slice = 0; slice < kDensitySlices; ++slice)
-        {
-            const float sliceBeginAmount =
-                interval.first + ((interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices));
-            const float sliceEndAmount =
-                interval.first + ((interval.second - interval.first) * (static_cast<float>(slice + 1) / kDensitySlices));
-            const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5F;
-            float sliceBegin[3] = { from[0] + (line[0] * sliceBeginAmount), from[1] + (line[1] * sliceBeginAmount),
-                                    from[2] + (line[2] * sliceBeginAmount) };
-            float sliceEnd[3] = { from[0] + (line[0] * sliceEndAmount), from[1] + (line[1] * sliceEndAmount),
-                                  from[2] + (line[2] * sliceEndAmount) };
-            const float midpoint[3] = { from[0] + (line[0] * midpointAmount), from[1] + (line[1] * midpointAmount),
-                                        from[2] + (line[2] * midpointAmount) };
-
-            float maximumStrength = 0.0F;
-            for (const BulletInfluence& influence : influences)
-            {
-                if (midpointAmount < influence.begin || midpointAmount > influence.end) continue;
-
-                const float distance = std::sqrt(DistanceSquaredToSegment(midpoint, influence.hole.start, influence.hole.end));
-                // The inner half is clear; the outer half feathers back to full density.
-                const float edge = Saturate((distance / influence.hole.radius - 0.5F) * 2.0F);
-                const float strength = 1.0F - SmoothStep(edge);
-                maximumStrength = std::max(maximumStrength, strength);
-            }
-            if (maximumStrength <= 0.001F) continue;
-
-            const float sliceDensity = std::max(sampler(sliceBegin, sliceEnd), 0.0F);
-            sampledDensity += sliceDensity;
-            weightedDensity += sliceDensity * (1.0F - maximumStrength);
-        }
-    }
-
-    if (sampledDensity <= 0.0001F) return density;
-
-    const float averageScale = Saturate(weightedDensity / sampledDensity);
-    const float affectedDensity = std::min(sampledDensity, density);
-    return std::max(density - (affectedDensity * (1.0F - averageScale)), 0.0F);
+// Feathers the tunnel edge back to full density.
+float DensityScale(const float* point, const Influence& influence)
+{
+    const float distance = std::sqrt(DistanceSquaredToSegment(point, influence.start, influence.end));
+    return SmoothStep((distance / influence.radius - 0.5F) * 2.0F);
 }
 
 // Stores the normal tunnel radius

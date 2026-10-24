@@ -6,6 +6,7 @@
 
 #include "features/bullet/BulletVision.h"
 #include "features/he/HeVision.h"
+#include "game_time.h"
 #include "core/cs2_sdk/src/utils/hooks.h"
 #include "memory.h"
 #include "core/cs2_sdk/src/utils/platform.h"
@@ -16,14 +17,18 @@
 #include <tier0/dbg.h>
 #include <entityhandle.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <climits>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <numbers>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -81,18 +86,83 @@ constexpr unsigned int kCacheRefreshUses = 1024;
 constexpr unsigned int kInvalidCacheRefreshUses = 32;
 thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
-// Calls the engine density function for effect modules
-float SampleEngineDensity(const float* from, const float* to)
-{
-    return g_getSmokeDensityInLine ? g_getSmokeDensityInLine(from, to, nullptr) : 0.0F;
-}
-
-// Applies HE and bullet effects to engine density
+// Integrates the strongest hole mask once per slice.
 float AdjustClientDensity(const float* from, const float* to, float density)
 {
-    float adjusted = density;
-    if (bullet_vision::GetHolesEnabled()) adjusted = bullet_vision::AdjustDensity(from, to, adjusted, &SampleEngineDensity);
-    return he_vision::AdjustDensity(from, to, adjusted, &SampleEngineDensity);
+    if (!from || !to || !g_getSmokeDensityInLine || density <= 0.0F) return density;
+
+    const float line[3] = { to[0] - from[0], to[1] - from[1], to[2] - from[2] };
+    const float lineLengthSquared = (line[0] * line[0]) + (line[1] * line[1]) + (line[2] * line[2]);
+    if (lineLengthSquared <= 0.001F) return density;
+
+    const float now = game_time::Now();
+    std::array<bullet_vision::Influence, bullet_vision::kMaxInfluences> bulletStorage;
+    std::array<he_vision::Influence, he_vision::kMaxInfluences> heStorage;
+    const size_t bulletCount = bullet_vision::GetHolesEnabled() ? bullet_vision::CollectInfluences(from, to, now, bulletStorage) : 0;
+    const size_t heCount = he_vision::CollectInfluences(from, to, now, heStorage);
+    const std::span bullets(bulletStorage.data(), bulletCount);
+    const std::span blasts(heStorage.data(), heCount);
+
+    std::array<float, 2 * (bullet_vision::kMaxInfluences + he_vision::kMaxInfluences)> boundaryStorage;
+    size_t boundaryCount = 0;
+    for (const auto& influence : bullets)
+    {
+        boundaryStorage[boundaryCount++] = influence.begin;
+        boundaryStorage[boundaryCount++] = influence.finish;
+    }
+    for (const auto& influence : blasts)
+    {
+        boundaryStorage[boundaryCount++] = influence.begin;
+        boundaryStorage[boundaryCount++] = influence.finish;
+    }
+    const std::span boundaries(boundaryStorage.data(), boundaryCount);
+    std::ranges::sort(boundaries);
+
+    constexpr int kDensitySlices = 5;
+    float sampledDensity = 0.0F;
+    float weightedDensity = 0.0F;
+    // Keep every hole boundary so narrow tunnels retain their samples.
+    for (size_t interval = 1; interval < boundaries.size(); ++interval)
+    {
+        const float begin = boundaries[interval - 1];
+        const float end = boundaries[interval];
+        if (end <= begin) continue;
+
+        for (int slice = 0; slice < kDensitySlices; ++slice)
+        {
+            const float sliceBeginAmount = begin + ((end - begin) * (static_cast<float>(slice) / kDensitySlices));
+            const float sliceEndAmount = begin + ((end - begin) * (static_cast<float>(slice + 1) / kDensitySlices));
+            const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5F;
+            const float midpoint[3] = { from[0] + (line[0] * midpointAmount), from[1] + (line[1] * midpointAmount),
+                                        from[2] + (line[2] * midpointAmount) };
+
+            float minimumScale = 1.0F;
+            for (const auto& influence : bullets)
+            {
+                if (midpointAmount < influence.begin || midpointAmount > influence.finish) continue;
+                minimumScale = std::min(minimumScale, bullet_vision::DensityScale(midpoint, influence));
+            }
+            for (const auto& influence : blasts)
+            {
+                if (midpointAmount < influence.begin || midpointAmount > influence.finish) continue;
+                minimumScale = std::min(minimumScale, he_vision::DensityScale(midpoint, influence));
+            }
+            if (minimumScale >= 0.999F) continue;
+
+            const float sliceBegin[3] = { from[0] + (line[0] * sliceBeginAmount), from[1] + (line[1] * sliceBeginAmount),
+                                          from[2] + (line[2] * sliceBeginAmount) };
+            const float sliceEnd[3] = { from[0] + (line[0] * sliceEndAmount), from[1] + (line[1] * sliceEndAmount),
+                                        from[2] + (line[2] * sliceEndAmount) };
+            const float sliceDensity = std::max(g_getSmokeDensityInLine(sliceBegin, sliceEnd, nullptr), 0.0F);
+            sampledDensity += sliceDensity;
+            weightedDensity += sliceDensity * minimumScale;
+        }
+    }
+    if (sampledDensity <= 0.0001F) return density;
+
+    const float averageScale = std::clamp(weightedDensity / sampledDensity, 0.0F, 1.0F);
+    const float affectedDensity = std::min(sampledDensity, density);
+    return std::max(density - (affectedDensity * (1.0F - averageScale)), 0.0F);
 }
 
 // Returns an install error for the plugin loader to log once.
@@ -335,13 +405,7 @@ KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, co
     const float threshold = thresholdMilli * 0.001F;
     if (density >= threshold)
     {
-        float bulletDensity = density;
-        if (bullet_vision::GetHolesEnabled())
-        {
-            bulletDensity = bullet_vision::AdjustDensity(fromValues, toValues, density, &SampleEngineDensity);
-        }
-        if (he_vision::AdjustDensity(fromValues, toValues, bulletDensity, &SampleEngineDensity) < threshold)
-            return { KHook::Action::Supersede, true };
+        if (AdjustClientDensity(fromValues, toValues, density) < threshold) return { KHook::Action::Supersede, true };
 
         g_blockedCount.fetch_add(1, std::memory_order_relaxed);
         return { KHook::Action::Supersede, false };

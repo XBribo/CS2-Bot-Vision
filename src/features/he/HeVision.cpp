@@ -16,7 +16,6 @@
 #include <tier0/dbg.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -36,18 +35,7 @@ struct HeBlast
     float startTime;
 };
 
-struct HeInfluence
-{
-    HeBlast blast;
-    float impulse;
-    float recovery;
-    float begin;
-    float end;
-};
-
 constexpr const char* kHeDetonateName = "CHEGrenadeProjectile::Detonate";
-constexpr size_t kMaxHeBlasts = 5;
-constexpr int kDensitySlices = 5;
 cs2_sdk::hooks::NativeHook<int64_t, void*> g_detonateHook;
 
 int g_bodyComponentOffset = -1;
@@ -68,13 +56,6 @@ float SmoothStep(float value)
 {
     const float amount = Saturate(value);
     return amount * amount * (3.0F - 2.0F * amount);
-}
-
-// Evaluates the HE density multiplier at one smoke point
-float DensityScale(float distance, float impulse, float recovery, float radius, float radiusScale)
-{
-    const float radial = SmoothStep((distance + impulse * radius - 200.0F * radiusScale) / (40.0F * radiusScale));
-    return 0.02F + (0.98F * std::max(radial, recovery));
 }
 
 // Captures the projectile origin before invoking the original detonation
@@ -149,30 +130,27 @@ void OnDetonate(float x, float y, float z)
 
     {
         std::scoped_lock lock(g_blastMutex);
-        if (g_blasts.size() == kMaxHeBlasts) g_blasts.erase(g_blasts.begin());
+        if (g_blasts.size() == kMaxInfluences) g_blasts.erase(g_blasts.begin());
         g_blasts.push_back({ .x = x, .y = y, .z = z, .startTime = time });
     }
 
     BV_LOG_DEBUG("HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d", x, y, z, time, GetActiveCount());
 }
 
-// Applies active HE records to native density inside each blast chord
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler)
+// Collects active blasts along a line.
+size_t CollectInfluences(const float* from, const float* to, float now, std::span<Influence, kMaxInfluences> influences)
 {
     const float duration = g_durationMilli.load(std::memory_order_relaxed) * 0.001F;
     const float radius = g_radiusMilli.load(std::memory_order_relaxed) * 0.001F;
-    if (!from || !to || !sampler || density <= 0.0F || duration <= 0.0F || radius <= 0.0F) return density;
+    if (duration <= 0.0F || radius <= 0.0F) return 0;
 
     const float line[3] = { to[0] - from[0], to[1] - from[1], to[2] - from[2] };
     const float lineLengthSquared = (line[0] * line[0]) + (line[1] * line[1]) + (line[2] * line[2]);
-    if (lineLengthSquared <= 0.001F) return density;
+    if (lineLengthSquared <= 0.001F) return 0;
 
-    const float now = game_time::Now();
-    const float radiusScale = radius / 250.0F;
     const float recoveryStart = duration * 0.1F;
     const float recoveryLength = std::max(duration - recoveryStart, 0.001F);
     std::scoped_lock lock(g_blastMutex);
-    std::array<HeInfluence, kMaxHeBlasts> influenceStorage;
     size_t influenceCount = 0;
     size_t writeIndex = 0;
     for (size_t index = 0; index < g_blasts.size(); ++index)
@@ -200,72 +178,26 @@ float AdjustDensity(const float* from, const float* to, float density, DensitySa
         if (end > begin)
         {
             const float recovery = std::pow(SmoothStep((age - recoveryStart) / recoveryLength), 1.8F);
-            influenceStorage[influenceCount++] = { .blast = blast, .impulse = impulse, .recovery = recovery, .begin = begin, .end = end };
+            influences[influenceCount++] = { .center = { blast.x, blast.y, blast.z },
+                                             .radius = radius,
+                                             .impulse = impulse,
+                                             .recovery = recovery,
+                                             .begin = begin,
+                                             .finish = end };
         }
     }
     g_blasts.resize(writeIndex);
-    const std::span influences(influenceStorage.data(), influenceCount);
-    if (influences.empty()) return density;
+    return influenceCount;
+}
 
-    std::ranges::sort(influences, [](const HeInfluence& left, const HeInfluence& right) {
-        return left.begin < right.begin;
-    });
-
-    std::array<std::pair<float, float>, kMaxHeBlasts> intervalStorage;
-    size_t intervalCount = 0;
-    for (const HeInfluence& influence : influences)
-    {
-        if (intervalCount == 0 || influence.begin > intervalStorage[intervalCount - 1].second + 0.0001F)
-        {
-            intervalStorage[intervalCount++] = { influence.begin, influence.end };
-        }
-        else
-        {
-            intervalStorage[intervalCount - 1].second = std::max(intervalStorage[intervalCount - 1].second, influence.end);
-        }
-    }
-
-    float sampledDensity = 0.0F;
-    float weightedDensity = 0.0F;
-    for (const std::pair<float, float>& interval : std::span(intervalStorage.data(), intervalCount))
-    {
-        for (int slice = 0; slice < kDensitySlices; ++slice)
-        {
-            const float sliceBeginAmount =
-                interval.first + ((interval.second - interval.first) * (static_cast<float>(slice) / kDensitySlices));
-            const float sliceEndAmount =
-                interval.first + ((interval.second - interval.first) * (static_cast<float>(slice + 1) / kDensitySlices));
-            const float midpointAmount = (sliceBeginAmount + sliceEndAmount) * 0.5F;
-            float sliceBegin[3] = { from[0] + (line[0] * sliceBeginAmount), from[1] + (line[1] * sliceBeginAmount),
-                                    from[2] + (line[2] * sliceBeginAmount) };
-            float sliceEnd[3] = { from[0] + (line[0] * sliceEndAmount), from[1] + (line[1] * sliceEndAmount),
-                                  from[2] + (line[2] * sliceEndAmount) };
-            const float midpoint[3] = { from[0] + (line[0] * midpointAmount), from[1] + (line[1] * midpointAmount),
-                                        from[2] + (line[2] * midpointAmount) };
-
-            float minimumScale = 1.0F;
-            for (const HeInfluence& influence : influences)
-            {
-                if (midpointAmount < influence.begin || midpointAmount > influence.end) continue;
-
-                const float delta[3] = { midpoint[0] - influence.blast.x, midpoint[1] - influence.blast.y,
-                                         midpoint[2] - influence.blast.z };
-                const float distance = std::sqrt((delta[0] * delta[0]) + (delta[1] * delta[1]) + (delta[2] * delta[2]));
-                minimumScale = std::min(minimumScale, DensityScale(distance, influence.impulse, influence.recovery, radius, radiusScale));
-            }
-            if (minimumScale >= 0.999F) continue;
-
-            const float sliceDensity = std::max(sampler(sliceBegin, sliceEnd), 0.0F);
-            sampledDensity += sliceDensity;
-            weightedDensity += sliceDensity * minimumScale;
-        }
-    }
-
-    if (sampledDensity <= 0.0001F) return density;
-
-    const float averageScale = std::clamp(weightedDensity / sampledDensity, 0.02F, 1.0F);
-    const float affectedDensity = std::min(sampledDensity, density);
-    return std::max(density - (affectedDensity * (1.0F - averageScale)), density * 0.02F);
+// Returns the blast density scale at a point.
+float DensityScale(const float* point, const Influence& influence)
+{
+    const float delta[3] = { point[0] - influence.center[0], point[1] - influence.center[1], point[2] - influence.center[2] };
+    const float distance = std::sqrt((delta[0] * delta[0]) + (delta[1] * delta[1]) + (delta[2] * delta[2]));
+    const float radiusScale = influence.radius / 250.0F;
+    const float radial = SmoothStep((distance + influence.impulse * influence.radius - 200.0F * radiusScale) / (40.0F * radiusScale));
+    return 0.02F + (0.98F * std::max(radial, influence.recovery));
 }
 
 // Stores the HE hole radius in fixed-point units

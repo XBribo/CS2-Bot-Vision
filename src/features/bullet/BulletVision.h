@@ -6,10 +6,20 @@
 
 #include <nlohmann/json.hpp>
 
-#include <cstdint>
+#include <cstddef>
+#include <span>
 
 namespace cs2bv::bullet_vision {
-using DensitySamplerFn = float (*)(const float* from, const float* to);
+constexpr size_t kMaxInfluences = 16;
+
+struct Influence
+{
+    float start[3];
+    float end[3];
+    float radius;
+    float begin;
+    float finish;
+};
 
 // Resolves and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule);
@@ -23,8 +33,11 @@ bool IsLineUnobstructed(const float* from, const float* to);
 // Records one temporary bullet smoke tunnel
 void OnHole(const float start[3], const float end[3], float radius);
 
-// Applies the bullet tunnel model to native line density
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler);
+// Collects active tunnels along a line.
+size_t CollectInfluences(const float* from, const float* to, float now, std::span<Influence, kMaxInfluences> influences);
+
+// Returns the tunnel density scale at a point.
+float DensityScale(const float* point, const Influence& influence);
 
 // Sets the normal bullet tunnel radius
 void SetRadius(float value);

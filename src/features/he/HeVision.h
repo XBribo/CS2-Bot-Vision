@@ -6,8 +6,21 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
+#include <span>
+
 namespace cs2bv::he_vision {
-using DensitySamplerFn = float (*)(const float* from, const float* to);
+constexpr size_t kMaxInfluences = 5;
+
+struct Influence
+{
+    float center[3];
+    float radius;
+    float impulse;
+    float recovery;
+    float begin;
+    float finish;
+};
 
 // Resolves and installs the optional HE detonation hook
 bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule);
@@ -18,8 +31,11 @@ void Remove();
 // Records an HE detonation as an active smoke hole
 void OnDetonate(float x, float y, float z);
 
-// Applies the HE smoke-hole model to native line density
-float AdjustDensity(const float* from, const float* to, float density, DensitySamplerFn sampler);
+// Collects active blasts along a line.
+size_t CollectInfluences(const float* from, const float* to, float now, std::span<Influence, kMaxInfluences> influences);
+
+// Returns the blast density scale at a point.
+float DensityScale(const float* point, const Influence& influence);
 
 // Sets the initial HE hole radius
 void SetRadius(float value);
