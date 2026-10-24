@@ -26,6 +26,19 @@ PLUGIN_EXPOSE(cs2bv::BotVisionPlugin, cs2bv::g_plugin);
 ISchemaSystem* g_schemaSystem = nullptr;
 
 namespace cs2bv {
+namespace {
+// Releases partial or active runtime state.
+void ClearRuntime()
+{
+    bot_vision::Remove();
+    ConVar_Unregister();
+    g_pCVar = nullptr;
+    commands::g_engine = nullptr;
+    bot_vision::SetEngine(nullptr);
+    cs2_sdk::schema::Reset();
+    g_schemaSystem = nullptr;
+}
+} // namespace
 
 BotVisionPlugin g_plugin;
 
@@ -35,13 +48,16 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
     if (!log::Init(ismm->GetBaseDir(), "BotVision", error, maxlen)) return false;
 
-    if (!KHook::__exported__khook)
-    {
-        std::snprintf(error, maxlen, "Metamod with KHook support is required");
-        BV_LOG_ERROR("%s", error);
+    // Reports one failure and rolls back initialization.
+    const auto fail = [error, maxlen](const char* reason) {
+        if (error && maxlen > 0) std::snprintf(error, maxlen, "%s", reason);
+        BV_LOG_ERROR("%s", reason);
+        ClearRuntime();
         log::Close();
         return false;
-    }
+    };
+
+    if (!KHook::__exported__khook) return fail("Metamod with KHook support is required");
 
     g_schemaSystem = static_cast<ISchemaSystem*>(ismm->VInterfaceMatch(ismm->GetEngineFactory(), SCHEMASYSTEM_INTERFACE_VERSION, 0));
     if (!g_schemaSystem)
@@ -49,64 +65,39 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
         BV_LOG_WARN("SchemaSystem unavailable; schema-dependent features disabled");
     }
 
+    char detail[256]{};
 #ifndef _WIN32
-    if (!cs2bv::memory::Initialize(error, maxlen))
-    {
-        BV_LOG_ERROR("%s", error);
-        log::Close();
-        return false;
-    }
+    if (!memory::Initialize(detail, sizeof(detail))) return fail(detail);
 #endif
 
-    cs2bv::commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
-    if (!cs2bv::commands::g_engine)
+    commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
+    if (!commands::g_engine)
     {
         BV_LOG_WARN("IVEngineServer2 unavailable; commands print to server console only");
     }
+    bot_vision::SetEngine(commands::g_engine);
 
-    // Wires g_pCVar and registers every CON_COMMAND_F
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
     if (!g_pCVar)
     {
-        std::snprintf(error, maxlen, "Failed to get ICvar (%s)", CVAR_INTERFACE_VERSION);
-        BV_LOG_ERROR("%s", error);
-        log::Close();
-        return false;
+        std::snprintf(detail, sizeof(detail), "Failed to get ICvar (%s)", CVAR_INTERFACE_VERSION);
+        return fail(detail);
     }
+
+    const std::string gamedataPath = gamedata::ComputePath();
+    if (gamedataPath.empty()) return fail("Failed to compute gamedata.json path");
+    if (!bot_vision::Install(gamedataPath, detail, sizeof(detail))) return fail(detail);
+
+    // Register commands only after initialization succeeds.
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
-
-    std::string gamedataPath = cs2bv::gamedata::ComputePath();
-    if (gamedataPath.empty())
-    {
-        std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
-        BV_LOG_ERROR("%s", error);
-        log::Close();
-        return false;
-    }
-
-    if (!cs2bv::bot_vision::Install(gamedataPath, error, maxlen))
-    {
-        BV_LOG_ERROR("%s", error);
-        log::Close();
-        return false;
-    }
-
-    cs2bv::bot_vision::SetEngine(cs2bv::commands::g_engine);
-
     BV_LOG_INFO("Loaded %s", GetVersion());
-    BV_LOG_DEBUG("Density threshold %.3f", cs2bv::bot_vision::GetDensityThreshold());
+    BV_LOG_DEBUG("Density threshold %.3f", bot_vision::GetDensityThreshold());
     return true;
 }
 
 bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
-    cs2bv::bot_vision::Remove();
-    ConVar_Unregister();
-    g_pCVar = nullptr;
-    cs2bv::commands::g_engine = nullptr;
-    cs2bv::bot_vision::SetEngine(nullptr);
-    cs2_sdk::schema::Reset();
-    g_schemaSystem = nullptr;
+    ClearRuntime();
     BV_LOG_INFO("Unloaded");
     log::Close();
     return true;
