@@ -374,7 +374,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kTraceStartOffset ||
         reinterpret_cast<uintptr_t>(&layoutProbe.m_vEndPos) - traceAddress != kTraceEndOffset)
     {
-        BV_LOG_ERROR("CGameTrace layout changed; bullet capture and HE traces disabled");
+        BV_LOG_ERROR("Bullet/HE traces disabled: CGameTrace layout mismatch");
         return false;
     }
 
@@ -395,7 +395,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
         g_traceShape = nullptr;
         const char* reason = traceShapeOffset < 0 ? "gamedata offset unavailable" : traceError;
         if (reason[0] == '\0') reason = "vtable slot is not executable";
-        BV_LOG_WARN("Native trace unavailable (%s); HE smoke holes disabled", reason);
+        BV_LOG_WARN("HE holes disabled: trace unavailable (%s)", reason);
     }
 
     const cs2_sdk::schema::FieldBinding fields[] = {
@@ -417,7 +417,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     bool installed = false;
     if (!resultTarget || !g_pelletResultHook.Install(resultTarget, &PelletResultPre, &PelletResultPost))
     {
-        BV_LOG_WARN("Pellet-result hook failed (%s); bullet holes disabled", resultTarget ? "KHook error" : resultError);
+        BV_LOG_WARN("Bullet holes disabled: %s", resultTarget ? "pellet-result hook failed" : resultError);
     }
     else if (pelletTarget && g_pelletTraceHook.Install(pelletTarget, &PelletTracePre, &HookedPelletTrace))
     {
@@ -427,7 +427,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     {
         g_pelletTraceHook.Remove();
         g_pelletResultHook.Remove();
-        BV_LOG_WARN("Pellet-trace hook failed (%s); bullet holes disabled", pelletTarget ? "KHook error" : pelletError);
+        BV_LOG_WARN("Bullet holes disabled: %s", pelletTarget ? "pellet-trace hook failed" : pelletError);
     }
 
     char getSlotError[256] = { 0 };
@@ -442,7 +442,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     else
     {
         const char* reason = weaponOffsetsReady ? getSlotError : "weapon schema offset unavailable";
-        BV_LOG_WARN("%s; shotgun radius disabled (all bullets use normal radius)", reason);
+        BV_LOG_WARN("Shotgun radius disabled: %s", reason);
     }
     return installed;
 }

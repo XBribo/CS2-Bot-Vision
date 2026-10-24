@@ -51,19 +51,15 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     // Reports one failure and rolls back initialization.
     const auto fail = [error, maxlen](const char* reason) {
         if (error && maxlen > 0) std::snprintf(error, maxlen, "%s", reason);
-        BV_LOG_ERROR("%s", reason);
+        BV_LOG_ERROR("Load failed: %s", reason);
         ClearRuntime();
         log::Close();
         return false;
     };
 
-    if (!KHook::__exported__khook) return fail("Metamod with KHook support is required");
+    if (!KHook::__exported__khook) return fail("KHook unavailable");
 
     g_schemaSystem = static_cast<ISchemaSystem*>(ismm->VInterfaceMatch(ismm->GetEngineFactory(), SCHEMASYSTEM_INTERFACE_VERSION, 0));
-    if (!g_schemaSystem)
-    {
-        BV_LOG_WARN("SchemaSystem unavailable; schema-dependent features disabled");
-    }
 
     char detail[256]{};
 #ifndef _WIN32
@@ -73,25 +69,24 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!commands::g_engine)
     {
-        BV_LOG_WARN("IVEngineServer2 unavailable; commands print to server console only");
+        BV_LOG_WARN("Client replies disabled: engine unavailable");
     }
     bot_vision::SetEngine(commands::g_engine);
 
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
     if (!g_pCVar)
     {
-        std::snprintf(detail, sizeof(detail), "Failed to get ICvar (%s)", CVAR_INTERFACE_VERSION);
+        std::snprintf(detail, sizeof(detail), "ICvar unavailable: %s", CVAR_INTERFACE_VERSION);
         return fail(detail);
     }
 
     const std::string gamedataPath = gamedata::ComputePath();
-    if (gamedataPath.empty()) return fail("Failed to compute gamedata.json path");
+    if (gamedataPath.empty()) return fail("Gamedata path unavailable");
     if (!bot_vision::Install(gamedataPath, detail, sizeof(detail))) return fail(detail);
 
     // Register commands only after initialization succeeds.
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
     BV_LOG_INFO("Loaded %s", GetVersion());
-    BV_LOG_DEBUG("Density threshold %.3f", bot_vision::GetDensityThreshold());
     return true;
 }
 

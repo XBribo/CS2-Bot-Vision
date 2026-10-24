@@ -169,13 +169,11 @@ float AdjustClientDensity(const float* from, const float* to, float density)
 // Returns an install error for the plugin loader to log once.
 void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
-    char buffer[512];
+    if (!error || maxLength == 0) return;
     va_list arguments;
     va_start(arguments, format);
-    std::vsnprintf(buffer, sizeof(buffer), format, arguments);
+    std::vsnprintf(error, maxLength, format, arguments);
     va_end(arguments);
-
-    if (error && maxLength > 0) std::snprintf(error, maxLength, "%s", buffer);
 }
 
 // Mixes a pointer for fixed-size cache indexing
@@ -218,7 +216,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     if (signature.empty())
     {
         g_autoListStatus = "sig_empty";
-        BV_LOG_WARN("AutoList entry/sig missing; hook disabled");
+        BV_LOG_WARN("AutoList unavailable: signature missing");
         return;
     }
 
@@ -229,7 +227,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     if (!cs2_sdk::modules::ParseSigString(signature, pattern, wildcards))
     {
         g_autoListStatus = "sig_parse_failed";
-        BV_LOG_WARN("AutoList sig parse failed");
+        BV_LOG_WARN("AutoList unavailable: invalid signature");
         return;
     }
 
@@ -237,7 +235,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     if (!site)
     {
         g_autoListStatus = "sig_not_found";
-        BV_LOG_WARN("AutoList sig missing or ambiguous");
+        BV_LOG_WARN("AutoList unavailable: signature missing/ambiguous");
         return;
     }
 
@@ -245,7 +243,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     if (!target || !memory::IsReadable(target, sizeof(void*)))
     {
         g_autoListStatus = "rel32_failed";
-        BV_LOG_WARN("AutoList rel32 target unavailable");
+        BV_LOG_WARN("AutoList unavailable: target unreadable");
         return;
     }
 
@@ -443,7 +441,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     ResolveAutoListHead(gamedata, serverModule);
     if (!g_smokeHook.Install(target, &HookedIsVisibleThroughSmoke))
     {
-        ReportError(error, maxLength, "KHook installation failed for %s", kSmokeFunctionName);
+        ReportError(error, maxLength, "Hook failed: %s", kSmokeFunctionName);
         return false;
     }
 
@@ -455,7 +453,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     }
     else
     {
-        BV_LOG_WARN("%s; mode 0 falls back to vanilla-smoke", densityError);
+        BV_LOG_WARN("Using vanilla smoke: %s", densityError);
     }
 
     char visibleError[256] = { 0 };
@@ -466,10 +464,10 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     {
         g_visiblePosHook.Remove();
         const char* reason = visibleError;
-        if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "required offset unavailable";
+        if (g_controllerHandleOffset < 0 || g_playerInBotOffset <= 0) reason = "schema offsets missing";
         else if (visibleTarget)
-            reason = "KHook error";
-        BV_LOG_WARN("IsVisiblePos hook failed (%s); per-bot density disabled", reason);
+            reason = "IsVisiblePos hook failed";
+        BV_LOG_WARN("Per-bot density disabled: %s", reason);
     }
 
     char visiblePlayerError[256] = { 0 };
@@ -481,10 +479,10 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     {
         g_visiblePlayerHook.Remove();
         const char* reason = visiblePlayerError;
-        if (g_controllerHandleOffset < 0) reason = "required offset unavailable";
+        if (g_controllerHandleOffset < 0) reason = "schema offset missing";
         else if (visiblePlayerTarget)
-            reason = "KHook error";
-        BV_LOG_WARN("IsVisiblePlayer hook failed (%s); target reveal disabled", reason);
+            reason = "IsVisiblePlayer hook failed";
+        BV_LOG_WARN("Reveal disabled: %s", reason);
     }
     return true;
 }

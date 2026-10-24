@@ -40,7 +40,7 @@ bool Initialize(char* error, size_t maxLength)
     const int readError = g_lastReadError.load(std::memory_order_relaxed);
     if (error && maxLength > 0)
     {
-        std::snprintf(error, maxLength, "process_vm_readv self-read failed (errno=%d: %s); check kernel/seccomp policy", readError,
+        std::snprintf(error, maxLength, "process_vm_readv failed: errno=%d (%s); check seccomp/kernel", readError,
                       std::strerror(readError));
     }
     return false;

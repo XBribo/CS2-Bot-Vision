@@ -33,7 +33,7 @@ nlohmann::json BuildDefaultConfig()
 // Reports one invalid startup setting
 void WarnInvalidSetting(const char* setting)
 {
-    BV_LOG_WARN("Invalid config setting '%s'; using default", setting);
+    BV_LOG_WARN("Invalid config: %s; using default", setting);
 }
 
 // Applies one nonnegative fixed-point startup setting
@@ -149,7 +149,7 @@ void LoadStartupConfig(const std::string& gamedataPath)
         }
         else
         {
-            BV_LOG_WARN("config.json missing and could not be created; using defaults");
+            BV_LOG_WARN("Cannot create config.json; using defaults");
         }
         return;
     }
@@ -158,7 +158,7 @@ void LoadStartupConfig(const std::string& gamedataPath)
     const nlohmann::json config = nlohmann::json::parse(configText, nullptr, false);
     if (config.is_discarded() || !config.is_object())
     {
-        BV_LOG_WARN("config.json parse error; using defaults");
+        BV_LOG_WARN("Invalid config.json; using defaults");
         return;
     }
     ApplyStartupConfig(config);

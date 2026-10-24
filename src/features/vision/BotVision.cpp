@@ -26,10 +26,9 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
     nlohmann::json gamedata;
     if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
     {
-        const char* format = "failed to read/parse gamedata.json at %s";
         if (error && maxLength > 0)
         {
-            std::snprintf(error, maxLength, format, gamedataPath.c_str());
+            std::snprintf(error, maxLength, "Cannot read/parse gamedata: %s", gamedataPath.c_str());
         }
         return false;
     }
@@ -41,7 +40,7 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
     {
         if (error && maxLength > 0)
         {
-            std::snprintf(error, maxLength, "could not open CS2 server module at '%s'",
+            std::snprintf(error, maxLength, "Server module unavailable: %s",
                           cs2_sdk::modules::server ? cs2_sdk::modules::server->Path() : "");
         }
         return false;
@@ -49,9 +48,10 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 
     const cs2_sdk::modules::ModuleInfo& serverModule = cs2_sdk::modules::server->Code();
 
-    if (!cs2_sdk::schema::Init(g_schemaSystem))
+    char schemaError[128]{};
+    if (!cs2_sdk::schema::Init(g_schemaSystem, schemaError, sizeof(schemaError)))
     {
-        BV_LOG_WARN("SchemaSystem unavailable; optional features disabled");
+        BV_LOG_WARN("Schema features disabled: %s", schemaError);
     }
 
     if (!smoke_vision::Install(gamedata, serverModule, error, maxLength)) return false;
@@ -66,8 +66,6 @@ void Remove()
     bullet_vision::Remove();
     he_vision::Remove();
     smoke_vision::Remove();
-
-    BV_LOG_DEBUG("Removed: hits=%lld blocked=%lld", GetHitCount(), GetBlockedCount());
 }
 
 void SetEngine(void* engine) { game_time::SetEngine(engine); }

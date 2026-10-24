@@ -85,19 +85,19 @@ KHook::Return<int64_t> HookedDetonate(void* self) noexcept
 // Resolves offsets and installs the optional HE detonation hook
 bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
+    char error[256]{};
     const cs2_sdk::schema::FieldBinding fields[] = {
         { &g_bodyComponentOffset, "CBaseEntity", "m_CBodyComponent" },
         { &g_sceneNodeOffset, "CBodyComponent", "m_pSceneNode" },
         { &g_absOriginOffset, "CGameSceneNode", "m_vecAbsOrigin" },
     };
-    if (!cs2_sdk::schema::ResolveFields(fields))
+    if (!cs2_sdk::schema::ResolveFields(fields, error, sizeof(error)))
     {
-        BV_LOG_WARN("HE offsets unavailable from schema; HE holes disabled");
+        BV_LOG_WARN("HE holes disabled: %s", error);
         g_hookStatus = "schema=FAIL";
         return false;
     }
 
-    char error[256] = { 0 };
     void* target = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
     if (target && g_detonateHook.Install(target, &HookedDetonate))
     {
@@ -106,7 +106,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     }
 
     g_detonateHook.Remove();
-    BV_LOG_WARN("HE detonate hook failed (%s); HE holes disabled", target ? "KHook error" : error);
+    BV_LOG_WARN("HE holes disabled: %s", target ? "detonate hook failed" : error);
     g_hookStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
 }
@@ -126,13 +126,15 @@ void OnDetonate(float x, float y, float z)
     const float point[3] = { x, y, z };
     if (!smoke_vision::HasSmokeNearPoint(point, GetRadius())) return;
 
+    int count = 0;
     {
         std::scoped_lock lock(g_blastMutex);
         if (g_blasts.size() == kMaxInfluences) g_blasts.erase(g_blasts.begin());
         g_blasts.push_back({ .x = x, .y = y, .z = z, .startTime = time });
+        count = static_cast<int>(g_blasts.size());
     }
 
-    BV_LOG_DEBUG("HE detonate @ (%.1f,%.1f,%.1f) t=%.2f total=%d", x, y, z, time, GetActiveCount());
+    BV_LOG_DEBUG("HE xyz=(%.1f,%.1f,%.1f) t=%.2f count=%d", x, y, z, time, count);
 }
 
 // Collects active blasts along a line.
