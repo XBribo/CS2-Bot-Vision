@@ -37,12 +37,6 @@ void PrintToCaller(const CCommandContext& context, const char* fmt, ...) // NOLI
     }
 }
 
-// Retains the static command registration entry point
-void Register() { /* CON_COMMAND_F self-registers via static init */ }
-
-// Retains the process-lifetime command cleanup entry point
-void Unregister() { /* process-lifetime; no-op */ }
-
 } // namespace cs2bv::commands
 
 // Prints aggregate runtime diagnostics
@@ -55,6 +49,9 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
                                    cs2bv::bot_vision::GetHitCount(), cs2bv::bot_vision::GetActiveBlastCount());
     cs2bv::commands::PrintToCaller(context, "[BotVision] bulletHoles=%d\n",
                                    cs2bv::bot_vision::GetActiveBulletHoleCount());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] autoList=%s densityFn=%s he=%s\n", cs2bv::bot_vision::GetAutoListStatus(),
+                                   cs2bv::bot_vision::IsDensityFnResolved() ? "resolved" : "missing", cs2bv::bot_vision::GetHeHookStatus());
+    cs2bv::commands::PrintToCaller(context, "[BotVision] safeRead: %s\n", cs2bv::bot_vision::GetSafeReadDiag());
 }
 
 // Tests smoke density along an explicit line

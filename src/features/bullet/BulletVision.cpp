@@ -109,7 +109,6 @@ struct PelletResultFrame
 };
 thread_local std::vector<PelletFrame> g_pelletFrames;
 thread_local std::vector<PelletResultFrame> g_pelletResultFrames;
-void** g_navPhysicsVtable = nullptr;
 
 int g_weaponServicesOffset = -1;
 int g_activeWeaponOffset = -1;
@@ -381,13 +380,12 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
 
     char traceError[256] = { 0 };
     // RTTI needs data sections; only instruction signatures use the code ranges.
-    g_navPhysicsVtable =
+    void** navPhysicsVtable =
         cs2_sdk::rtti::ResolveVirtualTable(cs2_sdk::modules::server->Image(), "CNavPhysicsInterface", traceError, sizeof(traceError));
     const int traceShapeOffset = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, kTraceShapeName, -1);
     void* traceShape = nullptr;
-    if (g_navPhysicsVtable && traceShapeOffset >= 0 && traceShapeOffset < 64 &&
-        memory::Read(g_navPhysicsVtable, static_cast<size_t>(traceShapeOffset) * sizeof(void*), traceShape,
-                     memory::FailureDomain::Install) &&
+    if (navPhysicsVtable && traceShapeOffset >= 0 && traceShapeOffset < 64 &&
+        memory::Read(navPhysicsVtable, static_cast<size_t>(traceShapeOffset) * sizeof(void*), traceShape, memory::FailureDomain::Install) &&
         cs2_sdk::memory::IsExecutableAddress(traceShape))
     {
         g_traceShape = reinterpret_cast<TraceShapeFn>(traceShape);
@@ -395,7 +393,6 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     else
     {
         g_traceShape = nullptr;
-        g_navPhysicsVtable = nullptr;
         const char* reason = traceShapeOffset < 0 ? "gamedata offset unavailable" : traceError;
         if (reason[0] == '\0') reason = "vtable slot is not executable";
         BV_LOG_WARN("Native trace unavailable (%s); HE smoke holes disabled", reason);
@@ -456,7 +453,6 @@ void Remove()
     g_pelletTraceHook.Remove();
     g_pelletResultHook.Remove();
     g_traceShape = nullptr;
-    g_navPhysicsVtable = nullptr;
     g_getSlot = nullptr;
     std::scoped_lock lock(g_holeMutex);
     g_holes.clear();

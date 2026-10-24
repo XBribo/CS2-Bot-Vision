@@ -21,8 +21,6 @@
 #include <cstdint>
 #include <mutex>
 #include <span>
-#include <string>
-#include <utility>
 #include <vector>
 
 namespace cs2bv::he_vision {
@@ -46,7 +44,7 @@ std::mutex g_blastMutex;
 std::vector<HeBlast> g_blasts;
 std::atomic<int> g_radiusMilli{ 250000 };
 std::atomic<int> g_durationMilli{ 5000 };
-std::string g_listenerStatus = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
+const char* g_hookStatus = "not_attempted";
 
 // Clamps a scalar to the normalized range
 float Saturate(float value) { return std::clamp(value, 0.0F, 1.0F); }
@@ -95,7 +93,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     if (!cs2_sdk::schema::ResolveFields(fields))
     {
         BV_LOG_WARN("HE offsets unavailable from schema; HE holes disabled");
-        g_listenerStatus = "schema=FAIL";
+        g_hookStatus = "schema=FAIL";
         return false;
     }
 
@@ -103,13 +101,13 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     void* target = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kHeDetonateName, error, sizeof(error));
     if (target && g_detonateHook.Install(target, &HookedDetonate))
     {
-        g_listenerStatus = "hook=ok";
+        g_hookStatus = "hook=ok";
         return true;
     }
 
     g_detonateHook.Remove();
     BV_LOG_WARN("HE detonate hook failed (%s); HE holes disabled", target ? "KHook error" : error);
-    g_listenerStatus = target ? "hook=FAIL" : "sig=FAIL";
+    g_hookStatus = target ? "hook=FAIL" : "sig=FAIL";
     return false;
 }
 
@@ -209,9 +207,6 @@ float GetRadius() { return g_radiusMilli.load(std::memory_order_relaxed) * 0.001
 // Stores the HE hole lifetime in fixed-point units
 void SetDuration(float value) { g_durationMilli.store(static_cast<int>(value * 1000.0F), std::memory_order_relaxed); }
 
-// Returns the HE hole lifetime
-float GetDuration() { return g_durationMilli.load(std::memory_order_relaxed) * 0.001F; }
-
 // Returns the number of retained HE holes
 int GetActiveCount()
 {
@@ -219,17 +214,6 @@ int GetActiveCount()
     return static_cast<int>(g_blasts.size());
 }
 
-// Stores the legacy event-listener diagnostic state
-void SetListenerStatus(bool managerResolved, bool listenerAdded)
-{
-    if (!managerResolved)
-    {
-        g_listenerStatus = "mgr=NULL";
-        return;
-    }
-    g_listenerStatus = listenerAdded ? "mgr=ok,add=ok" : "mgr=ok,add=FAIL";
-}
-
-// Returns the current HE diagnostic state
-const char* GetListenerStatus() { return g_listenerStatus.c_str(); }
+// Returns the HE hook status.
+const char* GetHookStatus() { return g_hookStatus; }
 } // namespace cs2bv::he_vision

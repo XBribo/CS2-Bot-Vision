@@ -52,7 +52,7 @@ void** g_autoListHead = nullptr;
 
 std::atomic<int64_t> g_hitCount{ 0 };
 std::atomic<int64_t> g_blockedCount{ 0 };
-std::string g_hookedStatus = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
+const char* g_autoListStatus = "not_attempted";
 std::atomic<int> g_smokeMode{ 0 };
 std::atomic<int> g_densityThresholdMilli{ 230 };
 
@@ -216,7 +216,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     const std::string signature = cs2_sdk::gameconfig::FindPlatformSig(gamedata, kAutoListName);
     if (signature.empty())
     {
-        g_hookedStatus = "sig_empty";
+        g_autoListStatus = "sig_empty";
         BV_LOG_WARN("AutoList entry/sig missing; hook disabled");
         return;
     }
@@ -227,7 +227,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     std::vector<bool> wildcards;
     if (!cs2_sdk::modules::ParseSigString(signature, pattern, wildcards))
     {
-        g_hookedStatus = "sig_parse_failed";
+        g_autoListStatus = "sig_parse_failed";
         BV_LOG_WARN("AutoList sig parse failed");
         return;
     }
@@ -235,7 +235,7 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     void* site = cs2_sdk::modules::FindPatternIn(serverModule, pattern, wildcards);
     if (!site)
     {
-        g_hookedStatus = "sig_not_found";
+        g_autoListStatus = "sig_not_found";
         BV_LOG_WARN("AutoList sig missing or ambiguous");
         return;
     }
@@ -243,15 +243,13 @@ void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules:
     void* target = ResolveRipRelative(static_cast<unsigned char*>(site), relativeOffset, instructionLength);
     if (!target || !memory::IsReadable(target, sizeof(void*)))
     {
-        g_hookedStatus = "rel32_failed";
+        g_autoListStatus = "rel32_failed";
         BV_LOG_WARN("AutoList rel32 target unavailable");
         return;
     }
 
     g_autoListHead = static_cast<void**>(target);
-    char status[96];
-    std::snprintf(status, sizeof(status), "ON@%p", target);
-    g_hookedStatus = status;
+    g_autoListStatus = "resolved";
 }
 
 // Resolves a bot engine slot through its pawn controller handle
@@ -503,9 +501,6 @@ void Remove()
 // Checks for volume-smoke mode
 bool IsVolumeMode() { return g_smokeMode.load(std::memory_order_relaxed) == 0; }
 
-// Checks whether the auto-list pointer is available
-bool AutoListReady() { return g_autoListHead != nullptr; }
-
 // Checks the smoke auto-list head validated during installation
 bool HasSmokeProjectiles() { return g_autoListHead && *g_autoListHead != nullptr; }
 
@@ -554,8 +549,8 @@ int64_t GetHitCount() { return g_hitCount.load(std::memory_order_relaxed); }
 // Returns the blocked line count
 int64_t GetBlockedCount() { return g_blockedCount.load(std::memory_order_relaxed); }
 
-// Returns the smoke hook diagnostic state
-const char* GetHookedStatus() { return g_hookedStatus.c_str(); }
+// Returns the smoke auto-list status.
+const char* GetAutoListStatus() { return g_autoListStatus; }
 
 // Stores the smoke calculation mode
 void SetMode(int mode) { g_smokeMode.store(mode, std::memory_order_relaxed); }

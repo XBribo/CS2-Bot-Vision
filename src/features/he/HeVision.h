@@ -46,15 +46,9 @@ float GetRadius();
 // Sets the HE hole lifetime
 void SetDuration(float value);
 
-// Returns the HE hole lifetime
-float GetDuration();
-
 // Returns the number of retained HE holes
 int GetActiveCount();
 
-// Overrides the legacy listener diagnostic state
-void SetListenerStatus(bool managerResolved, bool listenerAdded);
-
-// Returns the HE hook or listener diagnostic state
-const char* GetListenerStatus();
+// Returns the HE hook status.
+const char* GetHookStatus();
 } // namespace cs2bv::he_vision

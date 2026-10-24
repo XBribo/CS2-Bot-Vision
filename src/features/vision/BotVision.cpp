@@ -72,35 +72,19 @@ void Remove()
 
 void SetEngine(void* engine) { game_time::SetEngine(engine); }
 
-void OnHeDetonate(float x, float y, float z) { he_vision::OnDetonate(x, y, z); }
-
 void SetHeRadius(float value) { he_vision::SetRadius(value); }
-
-float GetHeRadius() { return he_vision::GetRadius(); }
 
 void SetHeDuration(float value) { he_vision::SetDuration(value); }
 
-float GetHeDuration() { return he_vision::GetDuration(); }
-
 int GetActiveBlastCount() { return he_vision::GetActiveCount(); }
 
-void SetHeListenerStatus(bool managerResolved, bool listenerAdded) { he_vision::SetListenerStatus(managerResolved, listenerAdded); }
-
-const char* GetHeListenerStatus() { return he_vision::GetListenerStatus(); }
-
-void OnBulletHole(const float start[3], const float end[3], float radius) { bullet_vision::OnHole(start, end, radius); }
+const char* GetHeHookStatus() { return he_vision::GetHookStatus(); }
 
 void SetBulletRadius(float value) { bullet_vision::SetRadius(value); }
 
-float GetBulletRadius() { return bullet_vision::GetRadius(); }
-
 void SetBulletRadiusShotgun(float value) { bullet_vision::SetShotgunRadius(value); }
 
-float GetBulletRadiusShotgun() { return bullet_vision::GetShotgunRadius(); }
-
 void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
-
-float GetBulletDuration() { return bullet_vision::GetDuration(); }
 
 void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }
 
@@ -112,9 +96,7 @@ int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 
 int64_t GetBlockedCount() { return smoke_vision::GetBlockedCount(); }
 
-bool IsHookedActive() { return smoke_vision::AutoListReady(); }
-
-const char* GetHookedStatus() { return smoke_vision::GetHookedStatus(); }
+const char* GetAutoListStatus() { return smoke_vision::GetAutoListStatus(); }
 
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength)
 {

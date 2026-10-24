@@ -19,9 +19,6 @@ void Remove();
 // Reports whether volume-smoke mode is selected
 bool IsVolumeMode();
 
-// Reports whether the smoke projectile list was resolved
-bool AutoListReady();
-
 // Reports whether the smoke projectile list is nonempty
 bool HasSmokeProjectiles();
 
@@ -37,8 +34,8 @@ int64_t GetHitCount();
 // Returns the number of lines blocked by density
 int64_t GetBlockedCount();
 
-// Returns the smoke hook diagnostic state
-const char* GetHookedStatus();
+// Returns the smoke auto-list status.
+const char* GetAutoListStatus();
 
 // Sets the active smoke calculation mode
 void SetMode(int mode);

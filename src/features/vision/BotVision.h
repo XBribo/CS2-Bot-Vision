@@ -16,50 +16,26 @@ void Remove();
 // Stores the engine interface used for server time
 void SetEngine(void* engine);
 
-// Records an HE detonation
-void OnHeDetonate(float x, float y, float z);
-
 // Sets the HE hole radius
 void SetHeRadius(float value);
-
-// Returns the HE hole radius
-float GetHeRadius();
 
 // Sets the HE hole lifetime
 void SetHeDuration(float value);
 
-// Returns the HE hole lifetime
-float GetHeDuration();
-
 // Returns the retained HE hole count
 int GetActiveBlastCount();
 
-// Overrides the legacy HE listener diagnostic
-void SetHeListenerStatus(bool managerResolved, bool listenerAdded);
-
-// Returns the HE hook or listener diagnostic
-const char* GetHeListenerStatus();
-
-// Records one bullet smoke tunnel
-void OnBulletHole(const float start[3], const float end[3], float radius);
+// Returns the HE hook status.
+const char* GetHeHookStatus();
 
 // Sets the normal bullet tunnel radius
 void SetBulletRadius(float value);
 
-// Returns the normal bullet tunnel radius
-float GetBulletRadius();
-
 // Sets the shotgun bullet tunnel radius
 void SetBulletRadiusShotgun(float value);
 
-// Returns the shotgun bullet tunnel radius
-float GetBulletRadiusShotgun();
-
 // Sets the bullet tunnel lifetime
 void SetBulletDuration(float value);
-
-// Returns the bullet tunnel lifetime
-float GetBulletDuration();
 
 // Enables or disables bullet smoke tunnels
 void SetBulletHolesEnabled(bool enabled);
@@ -76,11 +52,8 @@ int64_t GetHitCount();
 // Returns the smoke-blocked line count
 int64_t GetBlockedCount();
 
-// Reports whether the smoke auto-list was resolved
-bool IsHookedActive();
-
-// Returns the smoke hook diagnostic
-const char* GetHookedStatus();
+// Returns the smoke auto-list status.
+const char* GetAutoListStatus();
 
 // Formats a diagnostic smoke density query
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength);

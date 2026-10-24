@@ -93,7 +93,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
     cs2bv::bot_vision::SetEngine(cs2bv::commands::g_engine);
 
-    cs2bv::commands::Register();
     BV_LOG_INFO("Loaded %s", GetVersion());
     BV_LOG_DEBUG("Density threshold %.3f", cs2bv::bot_vision::GetDensityThreshold());
     return true;
@@ -101,7 +100,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
 bool BotVisionPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
-    cs2bv::commands::Unregister();
     cs2bv::bot_vision::Remove();
     ConVar_Unregister();
     g_pCVar = nullptr;
