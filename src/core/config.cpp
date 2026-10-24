@@ -17,7 +17,6 @@ constexpr bool kDefaultBulletHolesEnabled = true;
 constexpr float kDefaultBulletRadius = 20.0F;
 constexpr float kDefaultShotgunRadius = 80.0F;
 constexpr float kDefaultBulletDuration = 1.0F;
-constexpr double kMaximumFixedPointValue = (static_cast<double>(std::numeric_limits<int>::max()) / 1000.0) - 1.0;
 
 // Builds the packaged startup configuration
 nlohmann::json BuildDefaultConfig()
@@ -50,7 +49,7 @@ void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const
     }
 
     const double number = value.get<double>();
-    if (!std::isfinite(number) || number < 0.0 || number > kMaximumFixedPointValue)
+    if (!IsValidFixedPointValue(number))
     {
         WarnInvalidSetting(setting);
         return;
@@ -123,6 +122,14 @@ void ApplyStartupConfig(const nlohmann::json& config)
 }
 
 } // namespace
+
+// Checks the stored milli-unit range.
+bool IsValidFixedPointValue(double value)
+{
+    const double maximum = static_cast<double>(std::numeric_limits<int>::max());
+    if (!std::isfinite(value) || value < 0.0 || value > maximum / 1000.0) return false;
+    return static_cast<double>(static_cast<float>(value) * 1000.0F) <= maximum;
+}
 
 // Loads config.json beside gamedata.json and creates it when missing
 void LoadStartupConfig(const std::string& gamedataPath)

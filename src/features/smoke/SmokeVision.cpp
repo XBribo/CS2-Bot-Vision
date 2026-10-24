@@ -1,4 +1,5 @@
 #include "core/log.h"
+#include "core/config.h"
 #include "core/cs2_sdk/src/core/gameconfig.h"
 // Smoke visibility hooks and per-bot threshold state
 
@@ -559,7 +560,11 @@ void SetMode(int mode) { g_smokeMode.store(mode, std::memory_order_relaxed); }
 int GetMode() { return g_smokeMode.load(std::memory_order_relaxed); }
 
 // Stores the global density threshold
-void SetDensityThreshold(float value) { g_densityThresholdMilli.store(static_cast<int>(value * 1000.0F), std::memory_order_relaxed); }
+void SetDensityThreshold(float value)
+{
+    if (!config::IsValidFixedPointValue(value)) return;
+    g_densityThresholdMilli.store(static_cast<int>(value * 1000.0F), std::memory_order_relaxed);
+}
 
 // Returns the global density threshold
 float GetDensityThreshold() { return g_densityThresholdMilli.load(std::memory_order_relaxed) * 0.001F; }
@@ -571,6 +576,7 @@ bool DensityFunctionReady() { return g_getSmokeDensityInLine != nullptr; }
 void SetBotDensityThreshold(int slot, float value)
 {
     if (slot < 0 || slot >= kMaxBots) return;
+    if (!std::isfinite(value) || (value >= 0.0F && !config::IsValidFixedPointValue(value))) return;
 
     const int next = value < 0.0F ? kDefaultThreshold : static_cast<int>(value * 1000.0F);
     const int previous = g_botThresholdMilli[slot].exchange(next, std::memory_order_relaxed);

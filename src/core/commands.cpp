@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "config.h"
 #include "features/vision/BotVision.h"
 
 #include <tier0/dbg.h>
@@ -6,12 +7,61 @@
 #include <engine2/ivengineserver2.h>
 #include <playerslot.h>
 
-#include <algorithm>
+#include <cerrno>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+
+namespace {
+// Reads a bounded integer argument.
+bool ReadInt(const CCommandContext& context, const char* argument, int minimum, int maximum, int& value)
+{
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(argument, &end, 10);
+    if (end == argument || *end != '\0' || errno == ERANGE || parsed < minimum || parsed > maximum)
+    {
+        cs2bv::commands::PrintToCaller(context, "expected an integer from %d to %d\n", minimum, maximum);
+        return false;
+    }
+    value = static_cast<int>(parsed);
+    return true;
+}
+
+// Reads a finite float argument.
+bool ReadFloat(const CCommandContext& context, const char* argument, float& value)
+{
+    char* end = nullptr;
+    errno = 0;
+    const float parsed = std::strtof(argument, &end);
+    if (end == argument || *end != '\0' || errno == ERANGE || !std::isfinite(parsed))
+    {
+        cs2bv::commands::PrintToCaller(context, "expected a finite number within the float range\n");
+        return false;
+    }
+    value = parsed;
+    return true;
+}
+
+// Reads a player slot.
+bool ReadSlot(const CCommandContext& context, const char* argument, int& slot)
+{
+    return ReadInt(context, argument, 0, cs2bv::bot_vision::GetMaxBots() - 1, slot);
+}
+
+// Reads a density value or a negative override reset.
+bool ReadDensity(const CCommandContext& context, const char* argument, float& value, bool allowClear = false)
+{
+    if (!ReadFloat(context, argument, value)) return false;
+    if ((allowClear && value < 0.0F) || cs2bv::config::IsValidFixedPointValue(value)) return true;
+
+    cs2bv::commands::PrintToCaller(context, "density must be nonnegative and within the supported range\n");
+    return false;
+}
+} // namespace
 
 namespace cs2bv::commands {
 
@@ -64,14 +114,14 @@ CON_COMMAND_F(bv_test_los, // NOLINT(misc-use-anonymous-namespace,bugprone-throw
         cs2bv::commands::PrintToCaller(context, "usage: bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>\n");
         return;
     }
-    const auto fx = static_cast<float>(std::atof(args.Arg(1))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    const auto fy = static_cast<float>(std::atof(args.Arg(2))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    const auto fz = static_cast<float>(std::atof(args.Arg(3))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    const auto tx = static_cast<float>(std::atof(args.Arg(4))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    const auto ty = static_cast<float>(std::atof(args.Arg(5))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    const auto tz = static_cast<float>(std::atof(args.Arg(6))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    float coordinates[6]{};
+    for (int index = 0; index < 6; ++index)
+    {
+        if (!ReadFloat(context, args.Arg(index + 1), coordinates[index])) return;
+    }
     char buf[1024];
-    cs2bv::bot_vision::TestLos(fx, fy, fz, tx, ty, tz, buf, sizeof(buf));
+    cs2bv::bot_vision::TestLos(coordinates[0], coordinates[1], coordinates[2], coordinates[3], coordinates[4], coordinates[5], buf,
+                               sizeof(buf));
     cs2bv::commands::PrintToCaller(context, "%s", buf);
 }
 
@@ -89,10 +139,10 @@ CON_COMMAND_F(bv_smoke_mode, // NOLINT(misc-use-anonymous-namespace,bugprone-thr
                                        cs2bv::bot_vision::IsDensityFnResolved() ? "resolved" : "MISSING(mode0->ball-smoke)");
         return;
     }
-    int m = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    if (m < 0 || m > 1) m = 0;
-    cs2bv::bot_vision::SetSmokeMode(m);
-    cs2bv::commands::PrintToCaller(context, "smoke mode set to %d\n", m);
+    int mode = 0;
+    if (!ReadInt(context, args.Arg(1), 0, 1, mode)) return;
+    cs2bv::bot_vision::SetSmokeMode(mode);
+    cs2bv::commands::PrintToCaller(context, "smoke mode set to %d\n", mode);
 }
 
 // Reads or changes the global density threshold
@@ -105,9 +155,9 @@ CON_COMMAND_F(bv_density_threshold, // NOLINT(misc-use-anonymous-namespace,bugpr
         cs2bv::commands::PrintToCaller(context, "current density threshold = %.3f\n", cs2bv::bot_vision::GetDensityThreshold());
         return;
     }
-    auto v = static_cast<float>(std::atof(args.Arg(1))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    v = std::max(v, 0.0F);
-    cs2bv::bot_vision::SetDensityThreshold(v);
+    float threshold = 0.0F;
+    if (!ReadDensity(context, args.Arg(1), threshold)) return;
+    cs2bv::bot_vision::SetDensityThreshold(threshold);
     cs2bv::commands::PrintToCaller(context, "density threshold set to %.3f\n", cs2bv::bot_vision::GetDensityThreshold());
 }
 
@@ -117,7 +167,6 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
               "Negative d clears back to global. No args lists all set slots.",
               FCVAR_NONE)
 {
-    /* list every slot*/
     if (args.ArgC() < 2)
     {
         if (!cs2bv::bot_vision::IsVisiblePosHooked())
@@ -144,8 +193,8 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
         if (shown == 0) cs2bv::commands::PrintToCaller(context, "  (none set; all bots use default)\n");
         return;
     }
-    /* query a single slot */
-    const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    int slot = 0;
+    if (!ReadSlot(context, args.Arg(1), slot)) return;
     if (args.ArgC() < 3)
     {
         float v = cs2bv::bot_vision::GetBotDensityThreshold(slot);
@@ -155,10 +204,10 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
             cs2bv::commands::PrintToCaller(context, "slot %d density = %.3f\n", slot, v);
         return;
     }
-    /* set (or clear if negative) */
-    auto v = static_cast<float>(std::atof(args.Arg(2))); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    cs2bv::bot_vision::SetBotDensityThreshold(slot, v);
-    if (v < 0.0F) cs2bv::commands::PrintToCaller(context, "slot %d density cleared (uses default)\n", slot);
+    float threshold = 0.0F;
+    if (!ReadDensity(context, args.Arg(2), threshold, true)) return;
+    cs2bv::bot_vision::SetBotDensityThreshold(slot, threshold);
+    if (threshold < 0.0F) cs2bv::commands::PrintToCaller(context, "slot %d density cleared (uses default)\n", slot);
     else
         cs2bv::commands::PrintToCaller(context, "slot %d density set to %.3f\n", slot, cs2bv::bot_vision::GetBotDensityThreshold(slot));
 }
@@ -201,12 +250,8 @@ CON_COMMAND_F(bv_reveal, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
         return;
     }
 
-    const int slot = std::atoi(args.Arg(2)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    if (slot < 0 || slot >= cs2bv::bot_vision::GetMaxBots())
-    {
-        cs2bv::commands::PrintToCaller(context, "slot must be 0-%d\n", cs2bv::bot_vision::GetMaxBots() - 1);
-        return;
-    }
+    int slot = 0;
+    if (!ReadSlot(context, args.Arg(2), slot)) return;
 
     if (add)
     {
@@ -231,7 +276,8 @@ CON_COMMAND_F(bv_bullet_holes, // NOLINT(misc-use-anonymous-namespace,bugprone-t
         cs2bv::commands::PrintToCaller(context, "bullet holes = %d\n", cs2bv::bot_vision::GetBulletHolesEnabled() ? 1 : 0);
         return;
     }
-    const bool e = std::atoi(args.Arg(1)) != 0; // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    cs2bv::bot_vision::SetBulletHolesEnabled(e);
-    cs2bv::commands::PrintToCaller(context, "bullet holes set to %d\n", e ? 1 : 0);
+    int enabled = 0;
+    if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
+    cs2bv::bot_vision::SetBulletHolesEnabled(enabled != 0);
+    cs2bv::commands::PrintToCaller(context, "bullet holes set to %d\n", enabled);
 }
