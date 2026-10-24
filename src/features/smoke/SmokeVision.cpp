@@ -30,7 +30,6 @@
 #include <cstring>
 #include <numbers>
 #include <span>
-#include <string>
 #include <vector>
 
 namespace cs2bv::smoke_vision {
@@ -212,33 +211,17 @@ int GamedataInt(const nlohmann::json& gamedata, const char* name, const char* ke
 // Resolves the engine smoke projectile auto-list head
 void ResolveAutoListHead(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
-    const std::string signature = cs2_sdk::gameconfig::FindPlatformSig(gamedata, kAutoListName);
-    if (signature.empty())
+    char error[256]{};
+    void* site = cs2_sdk::gameconfig::ResolveSig(gamedata, serverModule, kAutoListName, error, sizeof(error));
+    if (!site)
     {
-        g_autoListStatus = "sig_empty";
-        BV_LOG_WARN("AutoList unavailable: signature missing");
+        g_autoListStatus = "sig_failed";
+        BV_LOG_WARN("AutoList unavailable: %s", error);
         return;
     }
 
     const int relativeOffset = GamedataInt(gamedata, kAutoListName, "offset", 3);
     const int instructionLength = GamedataInt(gamedata, kAutoListName, "rel_size", 7);
-    std::vector<uint8_t> pattern;
-    std::vector<bool> wildcards;
-    if (!cs2_sdk::modules::ParseSigString(signature, pattern, wildcards))
-    {
-        g_autoListStatus = "sig_parse_failed";
-        BV_LOG_WARN("AutoList unavailable: invalid signature");
-        return;
-    }
-
-    void* site = cs2_sdk::modules::FindPatternIn(serverModule, pattern, wildcards);
-    if (!site)
-    {
-        g_autoListStatus = "sig_not_found";
-        BV_LOG_WARN("AutoList unavailable: signature missing/ambiguous");
-        return;
-    }
-
     void* target = ResolveRipRelative(static_cast<unsigned char*>(site), relativeOffset, instructionLength);
     if (!target || !memory::IsReadable(target, sizeof(void*)))
     {
