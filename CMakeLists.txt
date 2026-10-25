@@ -73,7 +73,6 @@ add_library(
     src/core/commands.cpp
     src/core/config.cpp
     src/core/game_time.cpp
-    src/core/gamedata.cpp
     src/utils/memory.cpp
 )
 

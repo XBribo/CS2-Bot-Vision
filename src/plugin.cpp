@@ -14,7 +14,7 @@
 
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
-#include "core/gamedata.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "utils/memory.h"
 
@@ -77,7 +77,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
         return fail(detail);
     }
 
-    const std::string gamedataPath = gamedata::ComputePath();
+    const std::string gamedataPath = cs2_sdk::gameconfig::ComputePath();
     if (gamedataPath.empty()) return fail("Gamedata path unavailable");
     if (!bot_vision::Install(gamedataPath, detail, sizeof(detail))) return fail(detail);
 
