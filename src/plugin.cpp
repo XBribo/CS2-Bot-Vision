@@ -14,6 +14,7 @@
 
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
+#include "core/game_time.h"
 #include "core/cs2_sdk/src/core/gameconfig.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "utils/memory.h"
@@ -31,10 +32,10 @@ namespace {
 void ClearRuntime()
 {
     bot_vision::Remove();
+    game_time::Reset();
     ConVar_Unregister();
     g_pCVar = nullptr;
     commands::g_engine = nullptr;
-    bot_vision::SetEngine(nullptr);
     cs2_sdk::schema::Reset();
     g_schemaSystem = nullptr;
 }
@@ -68,7 +69,7 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
     commands::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!commands::g_engine) return fail("IVEngineServer2 unavailable");
-    bot_vision::SetEngine(commands::g_engine);
+    if (!game_time::Initialize()) return fail("NetworkServerService unavailable");
 
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
     if (!g_pCVar)

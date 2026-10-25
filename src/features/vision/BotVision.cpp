@@ -7,7 +7,6 @@
 #include "features/bullet/BulletVision.h"
 #include "features/he/HeVision.h"
 #include "features/smoke/SmokeVision.h"
-#include "game_time.h"
 #include "memory.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "plugin.h"
@@ -67,8 +66,6 @@ void Remove()
     he_vision::Remove();
     smoke_vision::Remove();
 }
-
-void SetEngine(void* engine) { game_time::SetEngine(engine); }
 
 void SetHeRadius(float value) { he_vision::SetRadius(value); }
 

@@ -13,9 +13,6 @@ bool Install(const std::string& gamedataPath, char* error = nullptr, size_t maxL
 // Removes bullet and HE hooks before the smoke hooks they depend on.
 void Remove();
 
-// Stores the engine interface used for server time
-void SetEngine(void* engine);
-
 // Sets the HE hole radius
 void SetHeRadius(float value);
 
