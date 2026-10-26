@@ -18,18 +18,18 @@ enum class FailureDomain : uint8_t
     Count
 };
 
-// Permission snapshots do not guarantee that an object stays alive.
+// Checks current readability; object lifetime is caller-managed.
 using cs2_sdk::memory::IsReadable;
 
 #ifndef _WIN32
-// Verifies that kernel-assisted reads are available before installing hooks
+// Verifies kernel-assisted reads before hook installation
 bool Initialize(char* error, size_t maxLength);
 #endif
 
-// Retains Linux errno for plugin diagnostics; failure may partially fill out.
+// Reads bytes and retains Linux errno; failure may partially fill out.
 bool ReadBytes(const void* address, void* out, size_t size);
 
-// Records one failed read and optionally its POSIX error for plugin diagnostics.
+// Records a failed read and optional POSIX error.
 void RecordFailure(FailureDomain domain, int posixError = 0);
 
 // Returns a borrowed buffer, overwritten on the next call.

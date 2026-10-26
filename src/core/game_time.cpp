@@ -11,14 +11,14 @@ namespace {
 INetworkServerService* g_serverService = nullptr;
 } // namespace
 
-// Resolves an interface even when no map is loaded yet.
+// Resolves the map-independent server service.
 bool Initialize()
 {
     g_serverService = static_cast<INetworkServerService*>(g_SMAPI->GetEngineFactory()(NETWORKSERVERSERVICE_INTERFACE_VERSION, nullptr));
     return g_serverService != nullptr;
 }
 
-// Called after effect hooks have been removed.
+// Releases the service after effect hooks stop.
 void Reset() { g_serverService = nullptr; }
 
 // Reacquires the current server across map changes.

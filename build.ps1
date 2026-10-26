@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 so CMake/MSBuild output renders correctly
+# Use UTF-8 for build output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 

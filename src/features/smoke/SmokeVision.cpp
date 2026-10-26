@@ -86,7 +86,7 @@ constexpr unsigned int kCacheRefreshUses = 1024;
 constexpr unsigned int kInvalidCacheRefreshUses = 32;
 thread_local BotThresholdCacheEntry g_thresholdCache[kCacheSize];
 
-// Zero density never blocks sight.
+// Checks positive density against the blocking threshold.
 bool BlocksSight(float density, float threshold) { return density > 0.0F && density >= threshold; }
 
 // Integrates the strongest hole mask once per slice.
@@ -124,7 +124,7 @@ float AdjustClientDensity(const float* from, const float* to, float density)
     constexpr int kDensitySlices = 5;
     float sampledDensity = 0.0F;
     float weightedDensity = 0.0F;
-    // Keep every hole boundary so narrow tunnels retain their samples.
+    // Preserve hole boundaries when sampling narrow tunnels.
     for (size_t interval = 1; interval < boundaries.size(); ++interval)
     {
         const float begin = boundaries[interval - 1];
@@ -168,7 +168,7 @@ float AdjustClientDensity(const float* from, const float* to, float density)
     return std::max(density - (affectedDensity * (1.0F - averageScale)), 0.0F);
 }
 
-// Returns an install error for the plugin loader to log once.
+// Formats an install error for the plugin loader.
 void ReportError(char* error, size_t maxLength, const char* format, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
     if (!error || maxLength == 0) return;
@@ -326,7 +326,7 @@ int CachedThresholdFromBot(int64_t bot)
     return threshold;
 }
 
-// Stamps a bot-specific threshold for this visibility invocation.
+// Sets the bot threshold for this visibility call.
 KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t, char, void*) noexcept
 {
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
@@ -340,7 +340,7 @@ KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t, char, void*) no
     return { KHook::Action::Ignore };
 }
 
-// Restores the enclosing threshold after the native visibility check.
+// Restores the enclosing visibility threshold.
 KHook::Return<int64_t> IsVisiblePosPost(int64_t, int64_t, char, void*) noexcept
 {
     g_currentBotThresholdMilli = g_thresholdFrames.back();
@@ -348,7 +348,7 @@ KHook::Return<int64_t> IsVisiblePosPost(int64_t, int64_t, char, void*) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Stamps target reveal state around one complete player visibility scan
+// Sets target reveal state for the visibility scan
 KHook::Return<bool> HookedIsVisiblePlayer(int64_t self, void* player, char testFov, unsigned char* visibleParts) noexcept
 {
     g_revealFrames.push_back(g_currentPlayerRevealed);
@@ -357,7 +357,7 @@ KHook::Return<bool> HookedIsVisiblePlayer(int64_t self, void* player, char testF
     return { KHook::Action::Ignore };
 }
 
-// Restores reveal state even if another consumer superseded the original scan.
+// Restores the enclosing reveal state.
 KHook::Return<bool> IsVisiblePlayerPost(int64_t, void*, char, unsigned char*) noexcept
 {
     g_currentPlayerRevealed = g_revealFrames.back();
@@ -365,7 +365,7 @@ KHook::Return<bool> IsVisiblePlayerPost(int64_t, void*, char, unsigned char*) no
     return { KHook::Action::Ignore };
 }
 
-// Replaces binary smoke visibility with density and hole checks
+// Determines smoke visibility from density and holes
 KHook::Return<bool> HookedIsVisibleThroughSmoke(void* self, const void* from, const void* to) noexcept
 {
     g_hitCount.fetch_add(1, std::memory_order_relaxed);
@@ -482,7 +482,7 @@ void Remove()
 // Checks for volume-smoke mode
 bool IsVolumeMode() { return g_smokeMode.load(std::memory_order_relaxed) == 0; }
 
-// Checks the smoke auto-list head validated during installation
+// Checks for active smoke projectiles
 bool HasSmokeProjectiles() { return g_autoListHead && *g_autoListHead != nullptr; }
 
 // Calls the engine density function when available

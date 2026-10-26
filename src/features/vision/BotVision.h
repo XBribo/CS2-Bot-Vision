@@ -7,7 +7,7 @@
 #include <string>
 
 namespace cs2bv::bot_vision {
-// Smoke hooks are required; HE and bullet hooks may be unavailable.
+// Installs required smoke hooks and optional HE/bullet hooks.
 bool Install(const std::string& gamedataPath, char* error = nullptr, size_t maxLength = 0);
 
 // Removes bullet and HE hooks before the smoke hooks they depend on.

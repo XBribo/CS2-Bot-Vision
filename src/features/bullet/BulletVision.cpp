@@ -228,7 +228,7 @@ int ActiveWeaponDefinition(void* pawn)
     return -1;
 }
 
-// Caches one weapon definition for all pellets in the same server time
+// Caches the weapon definition per shooter and server time
 int CachedActiveWeaponDefinition(void* shooter)
 {
     if (!shooter) return -1;
@@ -259,14 +259,14 @@ bool ValidPellet(const float (&source)[3], const float (&end)[3])
     return true;
 }
 
-// Saves the output pointer before native code can overwrite its argument registers.
+// Saves the output pointer before the native call.
 KHook::Return<int64_t> PelletResultPre(void* traceData, void* trace, float startFraction, void* hit) noexcept
 {
     g_pelletResultFrames.push_back({ trace, g_pelletFrames.size() });
     return { KHook::Action::Ignore };
 }
 
-// Copies the first valid native segment while its owning pellet call is active.
+// Captures the first valid segment for the active pellet call.
 KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float startFraction, void* hit) noexcept
 {
     const PelletResultFrame result = g_pelletResultFrames.back();
@@ -282,7 +282,7 @@ KHook::Return<int64_t> PelletResultPost(void* traceData, void* trace, float star
     return { KHook::Action::Ignore };
 }
 
-// Starts a pellet scope without requiring the optional native result vector.
+// Starts a pellet capture scope.
 KHook::Return<int64_t> PelletTracePre(int64_t a1,
 #ifdef _WIN32
                                       void* a2,
@@ -315,7 +315,7 @@ KHook::Return<int64_t> PelletTracePre(int64_t a1,
     return { KHook::Action::Ignore };
 }
 
-// Publishes the native segment captured during this pellet call, without retracing.
+// Publishes the captured native pellet segment.
 KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 #ifdef _WIN32
                                          void* a2,
@@ -368,7 +368,7 @@ KHook::Return<int64_t> HookedPelletTrace(int64_t a1,
 // Resolves offsets and installs optional bullet capture facilities
 bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& serverModule)
 {
-    // Checks SDK member offsets on a real object without non-standard offsetof.
+    // Validates trace offsets against an SDK object.
     const CGameTrace layoutProbe;
     const auto traceAddress = reinterpret_cast<uintptr_t>(&layoutProbe);
     if (reinterpret_cast<uintptr_t>(&layoutProbe.m_vStartPos) - traceAddress != kTraceStartOffset ||
@@ -379,7 +379,7 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
     }
 
     char traceError[256] = { 0 };
-    // RTTI needs data sections; only instruction signatures use the code ranges.
+    // Resolve RTTI from the full module image.
     void** navPhysicsVtable =
         cs2_sdk::rtti::ResolveVirtualTable(cs2_sdk::modules::server->Image(), "CNavPhysicsInterface", traceError, sizeof(traceError));
     const int traceShapeOffset = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, kTraceShapeName, -1);

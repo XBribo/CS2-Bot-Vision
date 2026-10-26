@@ -57,7 +57,7 @@ void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const
     setter(static_cast<float>(number));
 }
 
-// Applies validated startup settings over the active defaults
+// Applies validated startup settings
 void ApplyStartupConfig(const nlohmann::json& config)
 {
     if (config.contains("smoke"))
