@@ -197,7 +197,8 @@ float DensityScale(const float* point, const Influence& influence)
     const float distance = std::sqrt((delta[0] * delta[0]) + (delta[1] * delta[1]) + (delta[2] * delta[2]));
     const float radiusScale = influence.radius / 250.0F;
     const float radial = SmoothStep((distance + influence.impulse * influence.radius - 200.0F * radiusScale) / (40.0F * radiusScale));
-    return 0.02F + (0.98F * std::max(radial, influence.recovery));
+    // The shader adds radial and time recovery, then caps the accumulated factor at 1.
+    return 0.02F + (0.98F * Saturate(radial + influence.recovery));
 }
 
 // Stores the HE hole radius in fixed-point units
