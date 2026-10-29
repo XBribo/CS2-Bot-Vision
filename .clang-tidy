@@ -75,6 +75,7 @@ Checks: >
   -modernize-use-nodiscard,
   -modernize-avoid-c-arrays,
   -performance-move-const-arg,
+  -portability-avoid-pragma-once,
   -readability-braces-around-statements,
   -readability-identifier-length,
   -readability-magic-numbers,
@@ -127,3 +128,5 @@ CheckOptions:
   readability-identifier-naming.ClassConstantPrefix: 'k'
   readability-identifier-naming.EnumConstantCase: CamelCase
   readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.MethodIgnoredRegexp: '^(Schema_DynamicBinding_Unused|unk[0-9]+)$'
+  readability-identifier-naming.PublicMemberIgnoredRegexp: '^m_.*'
