@@ -53,7 +53,7 @@ jobs:
           fi
           echo "releasing v$VERSION"
 
-  # Builds and assembles the complete Windows package
+  # Builds the Windows package.
   windows:
     if: inputs.target == 'all' || inputs.target == 'windows'
     needs: guard
@@ -64,22 +64,23 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build package
-        shell: pwsh
-        run: ./build.ps1 -Windows
+      - name: Configure + build
+        run: |
+          cmake -B build -A x64 -S .
+          cmake --build build --config Release
 
       - name: Verify package
         shell: bash
         run: |
-          test -f dist/windows/addons/BotVision/bin/win64/BotVision.dll
-          test -f dist/windows/addons/metamod/BotVision.vdf
-          test ! -e dist/windows/addons/metamod/BotVision.linux.vdf
+          test -f build/package/addons/BotVision/bin/win64/BotVision.dll
+          test -f build/package/addons/metamod/BotVision.vdf
+          test ! -e build/package/addons/metamod/BotVision.linux.vdf
 
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
           name: BotVision-Windows-${{ needs.guard.outputs.version }}
-          path: dist/windows/
+          path: build/package/
           if-no-files-found: error
 
   # Builds and assembles the complete Linux package
