@@ -1,6 +1,9 @@
 name: Build
 
 on:
+  pull_request:
+    branches: [main]
+    paths: [src/core/cs2_sdk]
   workflow_dispatch:
     inputs:
       target:
@@ -55,7 +58,7 @@ jobs:
 
   # Builds and assembles the complete Windows package
   windows:
-    if: inputs.target == 'all' || inputs.target == 'windows'
+    if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'windows'
     needs: guard
     runs-on: windows-latest
     timeout-minutes: 60
@@ -76,6 +79,7 @@ jobs:
           test ! -e dist/windows/addons/metamod/BotVision.linux.vdf
 
       - name: Upload package
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: BotVision-Windows-${{ needs.guard.outputs.version }}
@@ -84,7 +88,7 @@ jobs:
 
   # Builds and assembles the complete Linux package
   linux:
-    if: inputs.target == 'all' || inputs.target == 'linux'
+    if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'linux'
     needs: guard
     runs-on: ubuntu-24.04
     container:
@@ -117,6 +121,7 @@ jobs:
           echo "$binary requires at most $max_glibc"
 
       - name: Upload package
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: BotVision-Linux-${{ needs.guard.outputs.version }}
