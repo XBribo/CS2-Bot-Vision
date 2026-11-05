@@ -20,7 +20,6 @@ permissions:
   contents: read
 
 jobs:
-  # Extracts the plugin version and validates release preconditions
   guard:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -53,7 +52,6 @@ jobs:
           fi
           echo "releasing v$VERSION"
 
-  # Builds the Windows package.
   windows:
     if: inputs.target == 'all' || inputs.target == 'windows'
     needs: guard
@@ -83,7 +81,6 @@ jobs:
           path: build/package/
           if-no-files-found: error
 
-  # Builds and assembles the complete Linux package
   linux:
     if: inputs.target == 'all' || inputs.target == 'linux'
     needs: guard
@@ -124,7 +121,6 @@ jobs:
           path: build/package/
           if-no-files-found: error
 
-  # Publishes both platform packages
   release:
     if: inputs.release
     needs: [guard, windows, linux]
