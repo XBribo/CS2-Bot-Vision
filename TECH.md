@@ -1,48 +1,14 @@
 # BotVision Developer Guide
 
-Installation and usage: [README.md](README.md).
+## Smoke visibility
 
-## Build
+- [BotVision.h](src/features/vision/BotVision.h) controls density thresholds and revealed players. A negative per-bot threshold restores the global setting.
+- [NativeSmoke.h](src/features/smoke/NativeSmoke.h) provides `Density(from, to, corrected)`. Call it on the server thread with two world-space positions. Pass `true` to include HE and bullet effects. A non-finite result means density is unavailable; use the engine's visibility decision.
 
-Run commands from the repository root.
+## Diagnostics
 
-### Requirements
+Use `bv_status` to check hooks and `bv_test_los <x1> <y1> <z1> <x2> <y2> <z2>` to compare raw and corrected density. To measure the geometry cache, compare tick time in the same scene with `bv_geometry_cache 0` and `1`.
 
-- **Windows:** Visual Studio 2026 C++ build tools and CMake.
-- **Linux:** `g++`, CMake, and Make.
-- **Build script:** PowerShell 7+; WSL for Linux (`Ubuntu-24.04` by default).
-- **Dependencies:** Git and the `cs2_sdk` submodule.
+## Build from source
 
-```bash
-git submodule update --init --recursive
-```
-
-### Build Script
-
-On a Windows host:
-
-```powershell
-./build.ps1             # Windows and Linux (WSL)
-./build.ps1 -Windows    # Windows only
-./build.ps1 -Linux      # Linux only (WSL)
-```
-
-Packages: `dist/windows/` and `dist/linux/`. Use `-Clean` for a clean rebuild.
-
-### Manual Build
-
-Windows:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64
-cmake --build build --config Release
-```
-
-Linux:
-
-```bash
-cmake -S . -B out/linux -DCMAKE_BUILD_TYPE=Release
-cmake --build out/linux -j$(nproc)
-```
-
-Native output: `<build-directory>/package/addons/`.
+Initialize dependencies with `git submodule update --init --recursive`. Run `./build.ps1 -Windows` or `./build.ps1 -Linux` (WSL). Packages are written to `dist/`.
