@@ -14,9 +14,12 @@
 
 A Metamod:Source plugin for Counter-Strike 2 that corrects bot vision through volumetric smoke, HE blast holes, and bullet tunnels.
 
-### Signature Status
+<details>
+<summary>Signature Status</summary>
 
-[![CS2 Bot Signatures Tracker](https://raw.githubusercontent.com/XBribo/cs2-bot-signatures/main/.github/docs/summary.svg)](https://github.com/XBribo/cs2-bot-signatures)
+[![Signature Status](https://raw.githubusercontent.com/XBribo/cs2-bot-signatures/main/.github/docs/summary.svg)](https://github.com/XBribo/cs2-bot-signatures)
+
+</details>
 
 ## Quick Start
 
