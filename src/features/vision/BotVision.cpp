@@ -7,6 +7,7 @@
 #include "features/bullet/BulletVision.h"
 #include "features/he/HeVision.h"
 #include "features/smoke/SmokeVision.h"
+#include "features/smoke/SmokeDensity.h"
 #include "memory.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "plugin.h"
@@ -53,39 +54,24 @@ bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
         BV_LOG_WARN("Schema features disabled: %s", schemaError);
     }
 
-    if (!smoke_vision::Install(gamedata, serverModule, error, maxLength)) return false;
-
-    he_vision::Install(gamedata, serverModule);
-    bullet_vision::Install(gamedata, serverModule);
-    return true;
+    return smoke_vision::Install(gamedata, serverModule, error, maxLength);
 }
 
-void Remove()
-{
-    bullet_vision::Remove();
-    he_vision::Remove();
-    smoke_vision::Remove();
-}
+void Remove() { smoke_vision::Remove(); }
 
-void SetHeRadius(float value) { he_vision::SetRadius(value); }
-
-void SetHeDuration(float value) { he_vision::SetDuration(value); }
-
-int GetActiveBlastCount() { return he_vision::GetActiveCount(); }
+std::pair<int, int> GetActiveEffectCounts() { return smoke_density::ActiveEffectCounts(); }
 
 const char* GetHeHookStatus() { return he_vision::GetHookStatus(); }
 
-void SetBulletRadius(float value) { bullet_vision::SetRadius(value); }
-
-void SetBulletRadiusShotgun(float value) { bullet_vision::SetShotgunRadius(value); }
-
-void SetBulletDuration(float value) { bullet_vision::SetDuration(value); }
+const char* GetModelStatus() { return smoke_density::Status(); }
+void SetGeometryCacheEnabled(bool enabled) { smoke_density::EnableGeometryCache(enabled); }
+bool GetGeometryCacheEnabled() { return smoke_density::GeometryCacheEnabled(); }
+uint64_t GetGeometryCacheHits() { return smoke_density::CacheHits(); }
+uint64_t GetGeometryCacheMisses() { return smoke_density::CacheMisses(); }
 
 void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }
 
 bool GetBulletHolesEnabled() { return bullet_vision::GetHolesEnabled(); }
-
-int GetActiveBulletHoleCount() { return bullet_vision::GetActiveHoleCount(); }
 
 int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 

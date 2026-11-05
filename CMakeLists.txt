@@ -63,6 +63,8 @@ add_library(
     src/plugin.cpp
     src/features/vision/BotVision.cpp
     src/features/smoke/SmokeVision.cpp
+    src/features/smoke/SmokeDensity.cpp
+    src/features/smoke/SmokeEffects.cpp
     src/features/he/HeVision.cpp
     src/features/bullet/BulletVision.cpp
     src/core/commands.cpp

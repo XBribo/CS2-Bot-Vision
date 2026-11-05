@@ -11,32 +11,16 @@ namespace cs2bv::config {
 namespace {
 constexpr int kDefaultSmokeMode = 0;
 constexpr float kDefaultDensityThreshold = 0.23F;
-constexpr float kDefaultHeRadius = 250.0F;
-constexpr float kDefaultHeDuration = 5.0F;
 constexpr bool kDefaultBulletHolesEnabled = true;
-constexpr float kDefaultBulletRadius = 20.0F;
-constexpr float kDefaultShotgunRadius = 80.0F;
-constexpr float kDefaultBulletDuration = 1.0F;
 
-// Builds the packaged startup configuration
 nlohmann::json BuildDefaultConfig()
 {
     return { { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
-             { "he_holes", { { "radius", kDefaultHeRadius }, { "duration", kDefaultHeDuration } } },
-             { "bullet_holes",
-               { { "enabled", kDefaultBulletHolesEnabled },
-                 { "radius", kDefaultBulletRadius },
-                 { "shotgun_radius", kDefaultShotgunRadius },
-                 { "duration", kDefaultBulletDuration } } } };
+             { "bullet_holes", { { "enabled", kDefaultBulletHolesEnabled } } } };
 }
 
-// Reports one invalid startup setting
-void WarnInvalidSetting(const char* setting)
-{
-    BV_LOG_WARN("Invalid config: %s; using default", setting);
-}
+void WarnInvalidSetting(const char* setting) { BV_LOG_WARN("Invalid config: %s; using default", setting); }
 
-// Applies one nonnegative fixed-point startup setting
 void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const char* setting, void (*setter)(float))
 {
     if (!section.contains(key)) return;
@@ -57,7 +41,6 @@ void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const
     setter(static_cast<float>(number));
 }
 
-// Applies validated startup settings
 void ApplyStartupConfig(const nlohmann::json& config)
 {
     if (config.contains("smoke"))
@@ -94,8 +77,7 @@ void ApplyStartupConfig(const nlohmann::json& config)
         }
         else
         {
-            ApplyNonNegativeFloat(heHoles, "radius", "he_holes.radius", bot_vision::SetHeRadius);
-            ApplyNonNegativeFloat(heHoles, "duration", "he_holes.duration", bot_vision::SetHeDuration);
+            BV_LOG_WARN("he_holes radius/duration are fixed (250 units, 5 seconds)");
         }
     }
 
@@ -108,22 +90,20 @@ void ApplyStartupConfig(const nlohmann::json& config)
         }
         else
         {
+            if (bulletHoles.contains("radius") || bulletHoles.contains("shotgun_radius") || bulletHoles.contains("duration"))
+                BV_LOG_WARN("bullet hole geometry/lifetime use fixed parameters (20/80 units, 1 second)");
             if (bulletHoles.contains("enabled"))
             {
                 if (bulletHoles["enabled"].is_boolean()) bot_vision::SetBulletHolesEnabled(bulletHoles["enabled"].get<bool>());
                 else
                     WarnInvalidSetting("bullet_holes.enabled");
             }
-            ApplyNonNegativeFloat(bulletHoles, "radius", "bullet_holes.radius", bot_vision::SetBulletRadius);
-            ApplyNonNegativeFloat(bulletHoles, "shotgun_radius", "bullet_holes.shotgun_radius", bot_vision::SetBulletRadiusShotgun);
-            ApplyNonNegativeFloat(bulletHoles, "duration", "bullet_holes.duration", bot_vision::SetBulletDuration);
         }
     }
 }
 
 } // namespace
 
-// Checks the stored milli-unit range.
 bool IsValidFixedPointValue(double value)
 {
     const double maximum = static_cast<double>(std::numeric_limits<int>::max());
@@ -131,7 +111,6 @@ bool IsValidFixedPointValue(double value)
     return static_cast<double>(static_cast<float>(value) * 1000.0F) <= maximum;
 }
 
-// Loads config.json beside gamedata.json and creates it when missing
 void LoadStartupConfig(const std::string& gamedataPath)
 {
     const nlohmann::json defaults = BuildDefaultConfig();
@@ -164,6 +143,4 @@ void LoadStartupConfig(const std::string& gamedataPath)
     ApplyStartupConfig(config);
 }
 
-
-
-}
+} // namespace cs2bv::config

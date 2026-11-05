@@ -1,12 +1,15 @@
 #pragma once // NOLINT(portability-avoid-pragma-once)
 
 namespace cs2bv::game_time {
-// Resolves the network server service.
 bool Initialize();
 
-// Releases the service interface after hooks stop.
 void Reset();
 
-// Returns the server time or zero before a server exists.
-float Now();
+struct Sample
+{
+    const void* server;
+    float time;
+};
+// Both fields come from the same server. Unavailable time is NaN.
+Sample Read();
 } // namespace cs2bv::game_time
