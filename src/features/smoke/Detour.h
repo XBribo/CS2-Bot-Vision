@@ -1,4 +1,3 @@
-// Source: unicbm/CS2-bot-improver-light@1d023039.
 #pragma once
 #include <khook.hpp>
 #include <memory>
