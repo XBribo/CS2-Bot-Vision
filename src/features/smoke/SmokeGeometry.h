@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 
 #include "SmokeEffects.h"
@@ -24,17 +23,18 @@ inline float EvaluateGeometry(const Geometry& geometry, float original, HoleCach
     return HoleCache::HeContribution(HoleCache::BulletDensity(geometry.bullet, original, sample, volume), geometry.heFactor);
 }
 
-// Cache entries store geometry by smoke handle, tick and exact coordinates. Density stays live.
+// Cache keys use smoke handle, effect tick and exact coordinates.
+// Density stays live.
 class GeometryCache
 {
   public:
-    // A view borrows its snapshot for one synchronous traversal.
+    // The snapshot outlives the synchronous traversal.
     class View
     {
       public:
         Geometry Sample(Vec3 point, uint32_t cell) const
         {
-            // A single bullet has conservative capsule bounds.
+            // Single-bullet bounds are conservative.
             if (empty_ || (bounds_ && (point.x < bounds_->minimum.x || point.x > bounds_->maximum.x || point.y < bounds_->minimum.y ||
                                        point.y > bounds_->maximum.y || point.z < bounds_->minimum.z || point.z > bounds_->maximum.z)))
                 return { { point, 0 }, 1 };

@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Adapted from unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
+// Source: unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
 #pragma once
 #include <algorithm>
 #include <array>
@@ -28,7 +27,7 @@ struct BulletSample
     float influence = 0;
 };
 
-// The cache belongs to the server thread.
+// The server thread owns the cache.
 class HoleCache
 {
   public:
@@ -73,7 +72,7 @@ class HoleCache
         bool Empty() const { return heCount == 0 && bulletCount == 0; }
         operator PreparedView() const { return { { he.data(), heCount }, { bullets.data(), bulletCount } }; }
     };
-    // HE records are owned; bullets borrow the query snapshot.
+    // HE records are copied. Bullets borrow the query snapshot.
     struct SmokeView
     {
         std::array<PreparedHe, HeCapacity> he{};
@@ -82,6 +81,7 @@ class HoleCache
         bool Empty() const { return heCount == 0 && bullets.empty(); }
         operator PreparedView() const { return { { he.data(), heCount }, bullets }; }
     };
+    // Capture validates finite coordinates/time and positive scale.
     void AddHe(Vec3 center, float time, std::vector<SmokeKey> affected, const void* owner = nullptr);
     void RemoveHe(const void* owner);
     void AddBullet(Vec3 start, Vec3 end, float time, float scale);
@@ -89,20 +89,18 @@ class HoleCache
     void Reset();
     std::uint64_t Generation() const { return generation_; }
     static BulletSample SampleBullet(Vec3 point, const PreparedView& snapshot);
-    // Adding positive zero preserves the empty evaluator's behavior.
+    // Positive zero preserves empty-evaluator behavior.
     static BulletSample IdentityBullet(Vec3 point) { return { { point.x + 0.0F, point.y + 0.0F, point.z + 0.0F }, 0 }; }
     static bool MayAffectRay(Vec3 from, Vec3 to, const PreparedView& snapshot);
     static float ApplyBullet(float density, float influence);
-    // Finite coordinates; the grid spans origin +/- 320.
+    // Coordinates are finite. Grid bounds are origin +/- 320.
     static bool IntersectsVolume(Vec3 start, Vec3 end, Vec3 origin);
-    // HE selection preserves event order. GPU depth is unavailable on the server.
-    static Snapshot ForSmoke(const Snapshot& snapshot, SmokeKey key, float smokeStart, float now);
+    // Preserve HE order. Server-side GPU depth is unavailable.
     static SmokeView ForSmokeView(const Snapshot& snapshot, SmokeKey key, float smokeStart, float now);
     static SmokeView ForSmokeView(Snapshot&&, SmokeKey, float, float) = delete;
     static SmokeView ForSmokeView(const Snapshot&&, SmokeKey, float, float) = delete;
     static float ApplyHePrepared(Vec3 point, float density, const PreparedView& snapshot);
-    static float ApplyHe(Vec3 point, SmokeKey key, float smokeStart, float now, float density, const PreparedView& snapshot);
-    // Relative opacity; server voxel density approximates client texture density.
+    // Server voxel density approximates client texture density.
     static float HeContribution(float density, float factor)
     {
         if (factor == 1 || density <= 0) return density;
@@ -115,7 +113,7 @@ class HoleCache
             return 1 - 100 * tail * tail * tail * (2 - 10 * tail);
         };
         const float base = std::clamp(density, 0.0f, 1.0f);
-        // Cancel the cubic terms to preserve the ratio near zero.
+        // Cancel cubic terms for stability near zero.
         const float ratio =
             base < .1f ? factor * factor * factor * (2 - 10 * base * factor) / (2 - 10 * base) : opacity(base * factor) / opacity(base);
         return density * ratio;
@@ -129,13 +127,8 @@ class HoleCache
         return ApplyBullet(density, bullet.influence);
     }
     static float EvaluateCellPrepared(Vec3 point, float original, const PreparedView& snapshot, Sampler sample, void* volume);
-    static float EvaluateBulletCell(BulletSample bullet, float original, const PreparedView& snapshot, Sampler sample, void* volume);
-    static float EvaluateCell(
-        Vec3 point, float original, SmokeKey key, float smokeStart, float now, const PreparedView& snapshot, Sampler sample, void* volume);
 
   private:
-    static float
-    ApplyHeInternal(Vec3 point, SmokeKey key, float smokeStart, float now, float density, const PreparedView& snapshot, bool prepared);
     std::array<He, HeCapacity> he_{};
     std::array<Bullet, BulletCapacity> bullets_{};
     std::size_t heFirst_ = 0, heCount_ = 0, bulletCursor_ = 0;

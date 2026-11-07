@@ -64,9 +64,9 @@ add_library(
     src/features/vision/BotVision.cpp
     src/features/smoke/SmokeVision.cpp
     src/features/smoke/SmokeDensity.cpp
+    src/features/smoke/SmokeCapture.cpp
+    src/features/smoke/SmokeBindings.cpp
     src/features/smoke/SmokeEffects.cpp
-    src/features/he/HeVision.cpp
-    src/features/bullet/BulletVision.cpp
     src/core/commands.cpp
     src/core/config.cpp
     src/core/game_time.cpp

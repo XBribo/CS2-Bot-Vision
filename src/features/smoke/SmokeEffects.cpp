@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Adapted from unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
+// Source: unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
 #include "SmokeEffects.h"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -27,7 +27,8 @@ Vec3 Unit(Vec3 a)
 } // namespace
 void HoleCache::AddHe(Vec3 center, float time, std::vector<SmokeKey> affected, const void* owner)
 {
-    if (!IsFinite(center) || !std::isfinite(time) || affected.empty()) return;
+    assert(IsFinite(center) && std::isfinite(time));
+    if (affected.empty()) return;
     // Each projectile publishes one HE event.
     if (owner)
         for (std::size_t i = 0; i < heCount_; ++i)
@@ -45,7 +46,7 @@ void HoleCache::RemoveHe(const void* owner)
     {
         auto& event = he_[(heFirst_ + i) % HeCapacity];
         if (event.owner != owner) continue;
-        // The client replaces the removed entry with the newest event.
+        // Client removal swaps in the newest event.
         auto& last = he_[(heFirst_ + heCount_ - 1) % HeCapacity];
         if (&event != &last) event = std::move(last);
         last = {};
@@ -56,9 +57,8 @@ void HoleCache::RemoveHe(const void* owner)
 }
 void HoleCache::AddBullet(Vec3 start, Vec3 end, float time, float scale)
 {
-    if (!IsFinite(start) || !IsFinite(end) || !std::isfinite(time) || !std::isfinite(scale) || scale <= 0 ||
-        Dot(Sub(end, start), Sub(end, start)) <= 0)
-        return;
+    assert(IsFinite(start) && IsFinite(end) && std::isfinite(time) && std::isfinite(scale) && scale > 0);
+    if (Dot(Sub(end, start), Sub(end, start)) <= 0) return;
     bullets_[bulletCursor_] = { start, end, time, scale, true };
     bulletCursor_ = (bulletCursor_ + 1) % BulletCapacity;
     ++generation_;
@@ -71,7 +71,7 @@ HoleCache::Snapshot HoleCache::Prepare(float now) const
     {
         const auto& h = he_[(heFirst_ + i) % HeCapacity];
         const float age = now - h.time;
-        if (h.affected.empty() || age < 0 || age >= 5) continue;
+        if (age < 0 || age >= 5) continue;
         result.he[result.heCount++] = { &h, age, std::pow(1 - Smooth(age / 2), 128.0f), std::pow(Smooth((age - .5f) / 4.5f), 1.8f) };
     }
     for (std::size_t i = 0; i < BulletCapacity; ++i)
@@ -83,7 +83,7 @@ HoleCache::Snapshot HoleCache::Prepare(float now) const
         const Vec3 shift{ 0, 0, k };
         const Vec3 a = Add(b.start, shift), end = Add(Add(b.start, Mul(Sub(b.end, b.start), k)), shift);
         const Vec3 delta = Sub(end, a);
-        // The broad phase uses 32/scale around the 20/scale support.
+        // Broad-phase radius is 32/scale; support is 20/scale.
         const float rejectDistance = 32 / b.scale;
         // Bounds include the rounded endpoint a + delta.
         const Vec3 last = Add(a, delta);
@@ -139,7 +139,7 @@ bool HoleCache::MayAffectRay(Vec3 from, Vec3 to, const PreparedView& snapshot)
 {
     // Bullet displacement precedes HE warps.
     if (!snapshot.he.empty() && !snapshot.bullets.empty()) return true;
-    // One cell of padding covers the DDA cell centers and boundary rounding.
+    // One-cell padding covers centers and rounding.
     const Vec3 minimum{ std::min(from.x, to.x) - 20, std::min(from.y, to.y) - 20, std::min(from.z, to.z) - 20 };
     const Vec3 maximum{ std::max(from.x, to.x) + 20, std::max(from.y, to.y) + 20, std::max(from.z, to.z) + 20 };
     // HE warps start inside an HE volume.
@@ -180,14 +180,6 @@ bool HoleCache::IntersectsVolume(Vec3 start, Vec3 end, Vec3 origin)
     }
     return true;
 }
-HoleCache::Snapshot HoleCache::ForSmoke(const Snapshot& snapshot, SmokeKey key, float smokeStart, float now)
-{
-    const auto selected = ForSmokeView(snapshot, key, smokeStart, now);
-    Snapshot result = snapshot;
-    result.he = selected.he;
-    result.heCount = selected.heCount;
-    return result;
-}
 HoleCache::SmokeView HoleCache::ForSmokeView(const Snapshot& snapshot, SmokeKey key, float smokeStart, float now)
 {
     SmokeView result;
@@ -201,24 +193,12 @@ HoleCache::SmokeView HoleCache::ForSmokeView(const Snapshot& snapshot, SmokeKey 
     }
     return result;
 }
-float HoleCache::ApplyHe(Vec3 point, SmokeKey key, float smokeStart, float now, float density, const PreparedView& snapshot)
-{
-    return ApplyHeInternal(point, key, smokeStart, now, density, snapshot, false);
-}
 float HoleCache::ApplyHePrepared(Vec3 point, float density, const PreparedView& snapshot)
-{
-    return ApplyHeInternal(point, {}, 0, 0, density, snapshot, true);
-}
-float HoleCache::ApplyHeInternal(
-    Vec3 point, SmokeKey key, float smokeStart, float now, float density, const PreparedView& snapshot, bool prepared)
 {
     float factor = 1;
     for (std::size_t i = 0; i < snapshot.he.size(); ++i)
     {
         const auto& h = snapshot.he[i];
-        if (!prepared && (!(h.age < now - smokeStart - .4f) ||
-                          std::find(h.event->affected.begin(), h.event->affected.end(), key) == h.event->affected.end()))
-            continue;
         const Vec3 offset = Sub(point, h.event->center);
         const float distance2 = Dot(offset, offset);
         if (distance2 >= 62500) continue;
@@ -238,19 +218,9 @@ void HoleCache::Reset()
     heFirst_ = heCount_ = bulletCursor_ = 0;
     ++generation_;
 }
-float HoleCache::EvaluateCell(
-    Vec3 point, float original, SmokeKey key, float smokeStart, float now, const PreparedView& snapshot, Sampler sample, void* volume)
-{
-    const auto bullet = SampleBullet(point, snapshot);
-    return HeContribution(BulletDensity(bullet, original, sample, volume), ApplyHe(bullet.position, key, smokeStart, now, 1, snapshot));
-}
 float HoleCache::EvaluateCellPrepared(Vec3 point, float original, const PreparedView& snapshot, Sampler sample, void* volume)
 {
     const auto bullet = snapshot.bullets.empty() ? IdentityBullet(point) : SampleBullet(point, snapshot);
-    return EvaluateBulletCell(bullet, original, snapshot, sample, volume);
-}
-float HoleCache::EvaluateBulletCell(BulletSample bullet, float original, const PreparedView& snapshot, Sampler sample, void* volume)
-{
     const float factor = ApplyHePrepared(bullet.position, 1, snapshot);
     return HeContribution(BulletDensity(bullet, original, sample, volume), factor);
 }

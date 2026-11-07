@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 #include "SmokeEffects.h"
 #include <cstddef>
@@ -18,17 +17,13 @@ struct CellContext
 static_assert(sizeof(void*) == 8 && sizeof(CellContext) == 0x20);
 static_assert(offsetof(CellContext, sum) == 8 && offsetof(CellContext, volume) == 0x18);
 
-// The x64 DDA borrows the callable for one synchronous traversal.
-// Win64 uses a vtable; libstdc++ uses an invoker and manager.
+// Traversal borrows the callback synchronously.
+// Win64 uses a vtable.
+// libstdc++ uses an invoker and manager.
 class BorrowedTraversal
 {
   public:
     using Adjust = void (*)(void*, CellContext*, const Vec3*, std::uint32_t, float, float);
-    enum class Contribution
-    {
-        Accumulated,
-        ExactCell
-    };
     static void* Callable(void* container)
     {
         void* callable;
@@ -47,7 +42,7 @@ class BorrowedTraversal
         return static_cast<CellContext*>(Callable(container));
 #endif
     }
-    // The dispatch identity is outside the visitor capture.
+    // Dispatch identity lies outside captured state.
     static const void* Identity(void* container)
     {
         const void* id = nullptr;
@@ -58,8 +53,8 @@ class BorrowedTraversal
 #endif
         return id;
     }
-    BorrowedTraversal(void* originalContainer, CellContext* context, void* state, Adjust adjust, Contribution contribution)
-        : proxy_{ &table_, Callable(originalContainer), nullptr, context, state, adjust, contribution }
+    BorrowedTraversal(void* originalContainer, CellContext* context, void* state, Adjust adjust)
+        : proxy_{ &table_, Callable(originalContainer), nullptr, context, state, adjust }
     {
 #ifdef _WIN32
         const void* vtable;
@@ -92,7 +87,6 @@ class BorrowedTraversal
         CellContext* context;
         void* state;
         Adjust adjust;
-        Contribution contribution;
     };
     struct ContainerStorage
     {
@@ -112,32 +106,22 @@ class BorrowedTraversal
         float* const sum = proxy.context->sum;
         const float before = *sum;
         bool result;
-        float original;
-        if (proxy.contribution == Contribution::ExactCell)
+        // Null closest output gives independent cell contributions.
+        float cellDensity = 0;
+        struct RestoreSum
         {
-            // With no closest output, the visitor adds one independent cell contribution.
-            float cellDensity = 0;
-            struct RestoreSum
-            {
-                CellContext& context;
-                float* previous;
-                ~RestoreSum() { context.sum = previous; }
-            };
-            {
-                RestoreSum restore{ *proxy.context, sum };
-                proxy.context->sum = &cellDensity;
-                result = proxy.invoke(proxy.original, point, cell);
-            }
-            original = cellDensity;
-            // Faults and stale generations retain the engine contribution.
-            *sum = before + original;
-        }
-        else
+            CellContext& context;
+            float* previous;
+            ~RestoreSum() { context.sum = previous; }
+        };
         {
+            RestoreSum restore{ *proxy.context, sum };
+            proxy.context->sum = &cellDensity;
             result = proxy.invoke(proxy.original, point, cell);
-            original = *sum - before;
         }
-        proxy.adjust(proxy.state, proxy.context, point, *cell, before, original);
+        // Faults or stale generations keep the engine contribution.
+        *sum = before + cellDensity;
+        proxy.adjust(proxy.state, proxy.context, point, *cell, before, cellDensity);
         return result;
     }
 #ifndef _WIN32

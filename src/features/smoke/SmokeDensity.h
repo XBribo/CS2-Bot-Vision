@@ -12,7 +12,7 @@ float Density(const float* from, const float* to, bool corrected);
 bool Ready();
 bool ListResolved();
 const char* Status();
-// Retained HE and bullet counts at the same game time.
+// Both counts use the same timestamp.
 std::pair<int, int> ActiveEffectCounts();
 void EnableBullets(bool enabled);
 bool BulletsEnabled();

@@ -41,6 +41,6 @@ uint64_t GetRevealMask();
 unsigned int GetRevealHandle(int slot);
 bool IsVisiblePlayerHooked();
 
-// Returns bytes written, excluding the terminating NUL.
+// Returns bytes written, excluding NUL.
 int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float toZ, char* buffer, size_t bufferLength);
 } // namespace cs2bv::smoke_vision

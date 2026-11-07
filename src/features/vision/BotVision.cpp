@@ -4,8 +4,6 @@
 
 #include "BotVision.h"
 
-#include "features/bullet/BulletVision.h"
-#include "features/he/HeVision.h"
 #include "features/smoke/SmokeVision.h"
 #include "features/smoke/SmokeDensity.h"
 #include "memory.h"
@@ -61,17 +59,15 @@ void Remove() { smoke_vision::Remove(); }
 
 std::pair<int, int> GetActiveEffectCounts() { return smoke_density::ActiveEffectCounts(); }
 
-const char* GetHeHookStatus() { return he_vision::GetHookStatus(); }
-
 const char* GetModelStatus() { return smoke_density::Status(); }
 void SetGeometryCacheEnabled(bool enabled) { smoke_density::EnableGeometryCache(enabled); }
 bool GetGeometryCacheEnabled() { return smoke_density::GeometryCacheEnabled(); }
 uint64_t GetGeometryCacheHits() { return smoke_density::CacheHits(); }
 uint64_t GetGeometryCacheMisses() { return smoke_density::CacheMisses(); }
 
-void SetBulletHolesEnabled(bool enabled) { bullet_vision::SetHolesEnabled(enabled); }
+void SetBulletHolesEnabled(bool enabled) { smoke_density::EnableBullets(enabled); }
 
-bool GetBulletHolesEnabled() { return bullet_vision::GetHolesEnabled(); }
+bool GetBulletHolesEnabled() { return smoke_density::BulletsEnabled(); }
 
 int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 

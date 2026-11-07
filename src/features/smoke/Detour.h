@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Shared KHook continuation adapter, adapted from unicbm/CS2-bot-improver-light@1d023039.
+// Source: unicbm/CS2-bot-improver-light@1d023039.
 #pragma once
 #include <khook.hpp>
 #include <memory>
@@ -15,7 +14,7 @@ template <typename R, typename... Args> class Detour<R (*)(Args...)>
       public:
         using KHook::Function<R, Args...>::Function;
         bool Active() const { return this->_associated_hook_id != KHook::INVALID_HOOK; }
-        // KHook may defer immediate registration when the target is busy.
+        // Busy targets may defer registration.
         void AttachNow(Function target)
         {
             auto* address = reinterpret_cast<void*>(target);
@@ -61,7 +60,6 @@ template <typename R, typename... Args> class Detour<R (*)(Args...)>
     bool Enabled() const { return hook_ != nullptr; }
     bool EnsureEnabled() { return hook_ || (target_ && Register(true)); }
     void Disable() { hook_.reset(); }
-    bool Owns(const void* target) const { return hook_ && hook_->Active() && reinterpret_cast<const void*>(target_) == target; }
     void Reset()
     {
         Disable();

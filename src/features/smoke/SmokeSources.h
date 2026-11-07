@@ -1,12 +1,11 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Adapted from unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
+// Source: unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
 #pragma once
 #include "SmokeEffects.h"
 #include <algorithm>
 #include <cmath>
 
 namespace cs2bv::smoke_effects {
-// A source stores byte XYZ and simulation feedback.
+// Sources store packed XYZ and simulation feedback.
 struct SmokeSource
 {
     std::uint32_t cell;
@@ -23,7 +22,7 @@ inline bool SourceCenter(Vec3 origin, SmokeSource source, Vec3& center)
     return IsFinite(center);
 }
 
-// One reachable initial source admits the smoke.
+// One reachable source admits the smoke.
 template <typename Trace> bool HeAffectsSources(Vec3 blast, Vec3 origin, std::span<const Vec3> sources, Trace&& reachable)
 {
     const float dx = std::max(std::abs(blast.x - origin.x) - 320.0f, 0.0f);

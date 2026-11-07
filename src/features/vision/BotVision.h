@@ -11,7 +11,6 @@ void Remove();
 
 // HE and bullet counts share a timestamp.
 std::pair<int, int> GetActiveEffectCounts();
-const char* GetHeHookStatus();
 const char* GetModelStatus();
 void SetGeometryCacheEnabled(bool enabled);
 bool GetGeometryCacheEnabled();
