@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Adapted from unicbm/CS2-bot-improver-light@1d023039, native/BotVision.
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -101,6 +102,24 @@ class HoleCache
     static SmokeView ForSmokeView(const Snapshot&&, SmokeKey, float, float) = delete;
     static float ApplyHePrepared(Vec3 point, float density, const PreparedView& snapshot);
     static float ApplyHe(Vec3 point, SmokeKey key, float smokeStart, float now, float density, const PreparedView& snapshot);
+    // Relative opacity; server voxel density approximates client texture density.
+    static float HeContribution(float density, float factor)
+    {
+        if (factor == 1 || density <= 0) return density;
+        // Uniform-noise approximation of Smooth(saturate(5 * (2 * density + noise - 1))).
+        const auto opacity = [](float d) {
+            if (d < .1f) return 100 * d * d * d * (2 - 10 * d);
+            if (d <= .5f) return 2 * d - .1f;
+            if (d >= .6f) return 1.0f;
+            const float tail = .6f - d;
+            return 1 - 100 * tail * tail * tail * (2 - 10 * tail);
+        };
+        const float base = std::clamp(density, 0.0f, 1.0f);
+        // Cancel the cubic terms to preserve the ratio near zero.
+        const float ratio =
+            base < .1f ? factor * factor * factor * (2 - 10 * base * factor) / (2 - 10 * base) : opacity(base * factor) / opacity(base);
+        return density * ratio;
+    }
     using Sampler = float (*)(void*, const Vec3*);
     static float BulletDensity(BulletSample bullet, float original, Sampler sample, void* volume)
     {

@@ -21,7 +21,7 @@ inline Geometry PrepareGeometry(Vec3 point, const HoleCache::PreparedView& effec
 
 inline float EvaluateGeometry(const Geometry& geometry, float original, HoleCache::Sampler sample, void* volume)
 {
-    return HoleCache::BulletDensity(geometry.bullet, original, sample, volume) * geometry.heFactor;
+    return HoleCache::HeContribution(HoleCache::BulletDensity(geometry.bullet, original, sample, volume), geometry.heFactor);
 }
 
 // Cache entries store geometry by smoke handle, tick and exact coordinates. Density stays live.

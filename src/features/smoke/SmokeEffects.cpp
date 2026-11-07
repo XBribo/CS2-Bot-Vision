@@ -233,7 +233,7 @@ float HoleCache::EvaluateCell(
     Vec3 point, float original, SmokeKey key, float smokeStart, float now, const PreparedView& snapshot, Sampler sample, void* volume)
 {
     const auto bullet = SampleBullet(point, snapshot);
-    return ApplyHe(bullet.position, key, smokeStart, now, BulletDensity(bullet, original, sample, volume), snapshot);
+    return HeContribution(BulletDensity(bullet, original, sample, volume), ApplyHe(bullet.position, key, smokeStart, now, 1, snapshot));
 }
 float HoleCache::EvaluateCellPrepared(Vec3 point, float original, const PreparedView& snapshot, Sampler sample, void* volume)
 {
@@ -242,6 +242,7 @@ float HoleCache::EvaluateCellPrepared(Vec3 point, float original, const Prepared
 }
 float HoleCache::EvaluateBulletCell(BulletSample bullet, float original, const PreparedView& snapshot, Sampler sample, void* volume)
 {
-    return ApplyHePrepared(bullet.position, BulletDensity(bullet, original, sample, volume), snapshot);
+    const float factor = ApplyHePrepared(bullet.position, 1, snapshot);
+    return HeContribution(BulletDensity(bullet, original, sample, volume), factor);
 }
 } // namespace cs2bv::smoke_effects
