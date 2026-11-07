@@ -12,37 +12,52 @@ namespace {
 constexpr int kDefaultSmokeMode = 0;
 constexpr float kDefaultDensityThreshold = 0.23F;
 constexpr bool kDefaultBulletHolesEnabled = true;
+constexpr bool kDefaultCommandsServerOnly = false;
+bool g_commandsServerOnly = kDefaultCommandsServerOnly;
 
 nlohmann::json BuildDefaultConfig()
 {
-    return { { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
+    return { { "commands", { { "server_only", kDefaultCommandsServerOnly } } },
+             { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
              { "bullet_holes", { { "enabled", kDefaultBulletHolesEnabled } } } };
 }
 
 void WarnInvalidSetting(const char* setting) { BV_LOG_WARN("Invalid config: %s; using default", setting); }
 
-void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const char* setting, void (*setter)(float))
+void ApplyDensityThreshold(const nlohmann::json& smoke)
 {
-    if (!section.contains(key)) return;
+    if (!smoke.contains("density_threshold")) return;
 
-    const auto& value = section[key];
+    const auto& value = smoke["density_threshold"];
     if (!value.is_number())
     {
-        WarnInvalidSetting(setting);
+        WarnInvalidSetting("smoke.density_threshold");
         return;
     }
 
     const double number = value.get<double>();
     if (!IsValidFixedPointValue(number))
     {
-        WarnInvalidSetting(setting);
+        WarnInvalidSetting("smoke.density_threshold");
         return;
     }
-    setter(static_cast<float>(number));
+    bot_vision::SetDensityThreshold(static_cast<float>(number));
 }
 
 void ApplyStartupConfig(const nlohmann::json& config)
 {
+    if (config.contains("commands"))
+    {
+        const auto& commands = config["commands"];
+        if (!commands.is_object()) WarnInvalidSetting("commands");
+        else if (commands.contains("server_only"))
+        {
+            if (commands["server_only"].is_boolean()) g_commandsServerOnly = commands["server_only"].get<bool>();
+            else
+                WarnInvalidSetting("commands.server_only");
+        }
+    }
+
     if (config.contains("smoke"))
     {
         const auto& smoke = config["smoke"];
@@ -64,22 +79,11 @@ void ApplyStartupConfig(const nlohmann::json& config)
                     WarnInvalidSetting("smoke.mode");
                 }
             }
-            ApplyNonNegativeFloat(smoke, "density_threshold", "smoke.density_threshold", bot_vision::SetDensityThreshold);
+            ApplyDensityThreshold(smoke);
         }
     }
 
-    if (config.contains("he_holes"))
-    {
-        const auto& heHoles = config["he_holes"];
-        if (!heHoles.is_object())
-        {
-            WarnInvalidSetting("he_holes");
-        }
-        else
-        {
-            BV_LOG_WARN("he_holes ignored: fixed radius=250 duration=5");
-        }
-    }
+    if (config.contains("he_holes")) BV_LOG_WARN("he_holes ignored: fixed radius=250 duration=5");
 
     if (config.contains("bullet_holes"))
     {
@@ -103,6 +107,8 @@ void ApplyStartupConfig(const nlohmann::json& config)
 }
 
 } // namespace
+
+bool AreCommandsServerOnly() { return g_commandsServerOnly; }
 
 bool IsValidFixedPointValue(double value)
 {

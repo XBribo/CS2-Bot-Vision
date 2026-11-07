@@ -21,7 +21,7 @@ using cs2bv::commands::PrintToCaller;
 namespace {
 bool CanModify(const CCommandContext& context)
 {
-    if (!context.GetPlayerSlot().IsValid()) return true;
+    if (!cs2bv::config::AreCommandsServerOnly() || !context.GetPlayerSlot().IsValid()) return true;
     PrintToCaller(context, "Use the server console or RCON to change BotVision settings.\n");
     return false;
 }

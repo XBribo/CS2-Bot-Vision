@@ -1,4 +1,7 @@
 {
+    "commands": {
+        "server_only": false
+    },
     "smoke": {
         "mode": 0,
         "density_threshold": 0.23
