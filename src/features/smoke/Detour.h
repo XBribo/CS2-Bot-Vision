@@ -19,9 +19,10 @@ template <typename R, typename... Args> class Detour<R (*)(Args...)>
         void AttachNow(Function target)
         {
             auto* address = reinterpret_cast<void*>(target);
-            const auto id = KHook::SetupHook(address, this, (void*)this->_KHook_RemovedHook, (void*)this->_KHook_Callback_PRE,
-                (void*)this->_KHook_Callback_POST, (void*)this->_KHook_MakeReturn, (void*)this->_KHook_MakeOriginalCall,
-                this->template _copy_stack_size<void*, Args...>(), false);
+            const auto id =
+                KHook::SetupHook(address, this, (void*)this->_KHook_RemovedHook, (void*)this->_KHook_Callback_PRE,
+                                 (void*)this->_KHook_Callback_POST, (void*)this->_KHook_MakeReturn, (void*)this->_KHook_MakeOriginalCall,
+                                 this->template _copy_stack_size<void*, Args...>(), false);
             if (id == KHook::INVALID_HOOK) return;
             std::lock_guard guard(this->_hooks_stored);
             this->_associated_hook_id = id;
@@ -37,7 +38,8 @@ template <typename R, typename... Args> class Detour<R (*)(Args...)>
     {
         auto hook = std::make_unique<Registered>(callback_, nullptr);
         if (immediate) hook->AttachNow(target_);
-        else hook->Configure(target_);
+        else
+            hook->Configure(target_);
         if (!hook->Active()) return false;
         hook_ = std::move(hook);
         return true;

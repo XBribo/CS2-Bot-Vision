@@ -34,7 +34,8 @@ void HoleCache::AddHe(Vec3 center, float time, std::vector<SmokeKey> affected, c
             if (he_[(heFirst_ + i) % HeCapacity].owner == owner) return;
     he_[(heFirst_ + heCount_) % HeCapacity] = { center, time, std::move(affected), owner };
     if (heCount_ == HeCapacity) heFirst_ = (heFirst_ + 1) % HeCapacity;
-    else ++heCount_;
+    else
+        ++heCount_;
     ++generation_;
 }
 void HoleCache::RemoveHe(const void* owner)
@@ -136,11 +137,19 @@ BulletSample HoleCache::SampleBullet(Vec3 point, const PreparedView& snapshot)
 }
 bool HoleCache::MayAffectRay(Vec3 from, Vec3 to, const PreparedView& snapshot)
 {
-    // HE warps the coordinates of subsequent effects.
-    if (!snapshot.he.empty()) return true;
+    // Bullet displacement precedes HE warps.
+    if (!snapshot.he.empty() && !snapshot.bullets.empty()) return true;
     // One cell of padding covers the DDA cell centers and boundary rounding.
     const Vec3 minimum{ std::min(from.x, to.x) - 20, std::min(from.y, to.y) - 20, std::min(from.z, to.z) - 20 };
     const Vec3 maximum{ std::max(from.x, to.x) + 20, std::max(from.y, to.y) + 20, std::max(from.z, to.z) + 20 };
+    // HE warps start inside an HE volume.
+    for (const auto& h : snapshot.he)
+    {
+        const auto center = h.event->center;
+        if (minimum.x <= center.x + 250 && maximum.x >= center.x - 250 && minimum.y <= center.y + 250 && maximum.y >= center.y - 250 &&
+            minimum.z <= center.z + 250 && maximum.z >= center.z - 250)
+            return true;
+    }
     for (std::size_t i = 0; i < snapshot.bullets.size(); ++i)
     {
         const auto& b = snapshot.bullets[i];

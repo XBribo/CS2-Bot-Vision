@@ -5,7 +5,8 @@
 #include <utility>
 
 namespace cs2bv::smoke_density {
-bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& server, void*& visibilityTarget, char* error, size_t maxLength);
+bool Install(
+    const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo& server, void*& visibilityTarget, char* error, size_t maxLength);
 void Remove();
 float Density(const float* from, const float* to, bool corrected);
 bool Ready();

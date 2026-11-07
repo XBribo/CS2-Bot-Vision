@@ -84,11 +84,35 @@ class GeometryCache
     {
         time_ = std::numeric_limits<float>::quiet_NaN();
         hits_ = misses_ = 0;
+        reuse_ = {};
     }
     uint64_t Hits() const { return hits_; }
     uint64_t Misses() const { return misses_; }
 
+    bool ShouldCache(HoleCache::PreparedView effects, SmokeKey smoke, float now, uint64_t generation)
+    {
+        if (effects.he.size() != 1 || !effects.bullets.empty()) return true;
+        constexpr unsigned minQueries = 2;
+        const uint64_t identity = (uint64_t(smoke.handle) << 32) | uint32_t(smoke.effectTick);
+        auto& reuse = reuse_[smoke.handle & (reuse_.size() - 1)];
+        if (reuse.queries == 0 || reuse.identity != identity) reuse = { identity, generation, now, 1, false };
+        else if (reuse.time != now || reuse.generation != generation)
+            reuse = { identity, generation, now, 1, reuse.queries >= minQueries };
+        else if (reuse.queries < minQueries)
+            ++reuse.queries;
+        return reuse.cached;
+    }
+
   private:
+    // Repeated queries enable single-HE caching.
+    struct Reuse
+    {
+        uint64_t identity = 0, generation = 0;
+        float time = 0;
+        unsigned queries = 0;
+        bool cached = false;
+    };
+    std::array<Reuse, 64> reuse_{};
     Geometry SampleAt(Vec3 point, uint32_t cell, const View& view)
     {
         const auto coordinates = std::bit_cast<std::array<uint32_t, 3>>(point);

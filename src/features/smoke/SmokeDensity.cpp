@@ -173,7 +173,12 @@ struct PelletFrame
 thread_local PelletFrame* g_pellet = nullptr;
 struct QueryFrame
 {
-    enum class State { Waiting, Inside, Returned };
+    enum class State
+    {
+        Waiting,
+        Inside,
+        Returned
+    };
     HoleCache::Snapshot effects;
     float now;
     std::uint64_t generation;
@@ -213,10 +218,7 @@ void SetError(char* error, std::size_t maxLength, const char* format, ...)
 }
 
 constexpr size_t kMaxFieldSpan = 65536;
-bool FitsField(int value, size_t width, size_t span)
-{
-    return value > 0 && width <= span && static_cast<size_t>(value) <= span - width;
-}
+bool FitsField(int value, size_t width, size_t span) { return value > 0 && width <= span && static_cast<size_t>(value) <= span - width; }
 
 bool ResolveOffset(const char* type, const char* field, std::size_t width, std::size_t& offset, char* error, std::size_t maxLength)
 {
@@ -259,8 +261,12 @@ void* ResolveVirtualSlot(const nlohmann::json& data, const char* type, const cha
     }
     return entry;
 }
-const void* ResolveRipTarget(void* site, const std::array<uint8_t, 3>& opcode, const cs2_sdk::modules::ModuleInfo& region,
-                             const char* name, char* error, size_t maxLength)
+const void* ResolveRipTarget(void* site,
+                             const std::array<uint8_t, 3>& opcode,
+                             const cs2_sdk::modules::ModuleInfo& region,
+                             const char* name,
+                             char* error,
+                             size_t maxLength)
 {
     if (!cs2_sdk::modules::ContainsRange(cs2_sdk::modules::server->Code(), site, 7) || std::memcmp(site, opcode.data(), opcode.size()) != 0)
     {
@@ -468,7 +474,8 @@ void CaptureHe(void* self)
                 return entry.entity == smoke && entry.key == key;
             });
             // Ready supplies the initial smoke sources; the smoke-age gate applies during sampling.
-            if (sources != g_initialSources.end() && smoke_effects::HeAffectsSources(blast, sources->origin, sources->points, SourceReachable))
+            if (sources != g_initialSources.end() &&
+                smoke_effects::HeAffectsSources(blast, sources->origin, sources->points, SourceReachable))
                 affected.push_back(key);
         }
         smoke = next;
@@ -482,7 +489,8 @@ KHook::Return<void> HookedGrenadeDestructor(void* self)
 #endif
 {
     if (MainThread()) HeDetonation::OnDestroyed(self);
-    else Fault("grenade destroyed off server thread");
+    else
+        Fault("grenade destroyed off server thread");
     return { KHook::Action::Ignore };
 }
 
@@ -639,6 +647,7 @@ void PrepareVolume(VolumeFrame& frame)
     frame.effects = HoleCache::ForSmokeView(frame.query.effects, key, startTime, frame.query.now);
     frame.prepared = frame.effects;
 }
+template <bool DirectHe = false>
 void AdjustCell(void* state, CellContext* context, const Vec3* point, std::uint32_t cell, float before, float original)
 {
     if (g_fault) return;
@@ -649,8 +658,14 @@ void AdjustCell(void* state, CellContext* context, const Vec3* point, std::uint3
         return;
     }
     if (frame.query.generation != g_holes.Generation()) return;
-    const auto geometry = frame.geometry ? frame.geometry->Sample(*point, cell) : smoke_effects::PrepareGeometry(*point, frame.prepared);
-    const float adjusted = smoke_effects::EvaluateGeometry(geometry, original, g_pointDensity, frame.volume);
+    float adjusted;
+    if constexpr (DirectHe) adjusted = HoleCache::EvaluateCellPrepared(*point, original, frame.prepared, g_pointDensity, frame.volume);
+    else
+    {
+        const auto geometry =
+            frame.geometry ? frame.geometry->Sample(*point, cell) : smoke_effects::PrepareGeometry(*point, frame.prepared);
+        adjusted = smoke_effects::EvaluateGeometry(geometry, original, g_pointDensity, frame.volume);
+    }
     if (!std::isfinite(adjusted) || adjusted < 0)
     {
         Fault("invalid adjusted density");
@@ -686,8 +701,10 @@ KHook::Return<void> HookedTraversal(void* volume, const Vec3* from, const Vec3* 
     QueryScope scope(nullptr);
     PrepareVolume(frame);
     if (g_fault || frame.effects.Empty()) return g_traversalDetour.Continue(volume, from, to, container);
-    if (g_cacheEnabled) frame.geometry.emplace(g_geometry.Bind(frame.prepared, frame.key, frame.query.now, frame.query.generation));
-    BorrowedTraversal borrowed(container, context, &frame, &AdjustCell, BorrowedTraversal::Contribution::ExactCell);
+    if (g_cacheEnabled && g_geometry.ShouldCache(frame.prepared, frame.key, frame.query.now, frame.query.generation))
+        frame.geometry.emplace(g_geometry.Bind(frame.prepared, frame.key, frame.query.now, frame.query.generation));
+    const auto adjust = !frame.geometry && frame.prepared.bullets.empty() ? &AdjustCell<true> : &AdjustCell<>;
+    BorrowedTraversal borrowed(container, context, &frame, adjust, BorrowedTraversal::Contribution::ExactCell);
     return g_traversalDetour.Continue(volume, from, to, borrowed.Container());
 }
 const HoleCache::Snapshot& EffectsAt(float now, std::uint64_t generation)
@@ -708,8 +725,7 @@ void RetireIdleLine()
     if (!g_lineDetour.Enabled() || g_query) return;
     if (g_fault || !HasActiveSmoke()) return g_lineDetour.Disable();
     const float now = Now();
-    if (!std::isfinite(now) || EffectsAt(now, g_holes.Generation()).Empty())
-        g_lineDetour.Disable();
+    if (!std::isfinite(now) || EffectsAt(now, g_holes.Generation()).Empty()) g_lineDetour.Disable();
 }
 KHook::Return<void> AfterGameFrame(ISource2Server*, bool, bool, bool)
 {
@@ -723,8 +739,7 @@ float QueryDensity(const float* start, const float* end, bool corrected)
     float from[3], to[3];
     std::memcpy(from, start, sizeof(from));
     std::memcpy(to, end, sizeof(to));
-    if (!IsFinite({ from[0], from[1], from[2] }) || !IsFinite({ to[0], to[1], to[2] }))
-        return std::numeric_limits<float>::quiet_NaN();
+    if (!IsFinite({ from[0], from[1], from[2] }) || !IsFinite({ to[0], to[1], to[2] })) return std::numeric_limits<float>::quiet_NaN();
     if (!HasActiveSmoke()) return 0.0F;
     const float now = Now();
     if (!std::isfinite(now)) return std::numeric_limits<float>::quiet_NaN();
@@ -732,8 +747,8 @@ float QueryDensity(const float* start, const float* end, bool corrected)
     const auto query = [&](QueryFrame* frame) {
         QueryScope scope(frame);
         const float result = g_getSmokeDensity(from, to, frame ? frame->output : nullptr);
-        return g_fault || (frame && frame->state != QueryFrame::State::Returned) ||
-                       (corrected && generation != g_holes.Generation()) || !std::isfinite(result) || result < 0.0F
+        return g_fault || (frame && frame->state != QueryFrame::State::Returned) || (corrected && generation != g_holes.Generation()) ||
+                       !std::isfinite(result) || result < 0.0F
                    ? std::numeric_limits<float>::quiet_NaN()
                    : result;
     };
@@ -768,7 +783,8 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
         return false;
     }
     auto* scope = g_schemaSystem && g_schemaSystem->SchemaSystemIsReady()
-                      ? g_schemaSystem->FindTypeScopeForModule(cs2_sdk::modules::kSchemaServerTypeScope, nullptr) : nullptr;
+                      ? g_schemaSystem->FindTypeScopeForModule(cs2_sdk::modules::kSchemaServerTypeScope, nullptr)
+                      : nullptr;
     auto* projectile = scope ? scope->FindDeclaredClass("CSmokeGrenadeProjectile").Get() : nullptr;
     if (!projectile || projectile->m_nSizeOf <= 0)
     {
@@ -813,18 +829,12 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
         void*& entry;
     };
     const Signature required[]{
-        { "CBotManager::IsVisibleThroughSmoke", address.visibility },
-        { "GetSmokeDensityInLine", address.density },
-        { "CHEGrenadeProjectile::Detonate", address.heDetonate },
-        { "BulletPelletTrace", address.pelletTrace },
-        { "g_AutoList_SmokeProj_Head_Server", address.listSite },
-        { "CBaseCSGrenadeProjectile::PublishEffect", address.publish },
-        { "BulletPelletTraceResult", address.pelletResult },
-        { "SmokeVolume::Traverse", address.traverse },
-        { "SmokeVolume::DensityVisitor", address.visitorSite },
-        { "SmokeVolume::PointDensity", address.pointDensity },
-        { "CCSPlayer_WeaponServices::GetSlot", address.getSlot },
-        { "SmokeVolume::InitializeReady", address.initialize },
+        { "CBotManager::IsVisibleThroughSmoke", address.visibility }, { "GetSmokeDensityInLine", address.density },
+        { "CHEGrenadeProjectile::Detonate", address.heDetonate },     { "BulletPelletTrace", address.pelletTrace },
+        { "g_AutoList_SmokeProj_Head_Server", address.listSite },     { "CBaseCSGrenadeProjectile::PublishEffect", address.publish },
+        { "BulletPelletTraceResult", address.pelletResult },          { "SmokeVolume::Traverse", address.traverse },
+        { "SmokeVolume::DensityVisitor", address.visitorSite },       { "SmokeVolume::PointDensity", address.pointDensity },
+        { "CCSPlayer_WeaponServices::GetSlot", address.getSlot },     { "SmokeVolume::InitializeReady", address.initialize },
         { "CSmokeGrenadeProjectile::Ready", address.ready },
     };
     for (const auto& binding : required)
@@ -833,10 +843,10 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
         if (!binding.entry) return false;
     }
 #ifdef _WIN32
-    constexpr std::array<uint8_t, 3> visitorLea{0x48, 0x8d, 0x0d}; // lea rcx, [visitor vtable]
+    constexpr std::array<uint8_t, 3> visitorLea{ 0x48, 0x8d, 0x0d }; // lea rcx, [visitor vtable]
     const auto& identityRegion = cs2_sdk::modules::server->Image();
 #else
-    constexpr std::array<uint8_t, 3> visitorLea{0x48, 0x8d, 0x05}; // lea rax, [visitor invoker]
+    constexpr std::array<uint8_t, 3> visitorLea{ 0x48, 0x8d, 0x05 }; // lea rax, [visitor invoker]
     const auto& identityRegion = server;
 #endif
     const auto* visitor = ResolveRipTarget(address.visitorSite, visitorLea, identityRegion, "density visitor", error, maxLength);
@@ -846,8 +856,8 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     if (!traceShape) return false;
     auto* destructor = ResolveVirtualSlot(data, kDestructorClass, "GrenadeProjectile::Destructor", error, maxLength);
     if (!destructor) return false;
-    auto head = static_cast<void* const*>(ResolveRipTarget(address.listSite, {0x48, 0x8b, 0x1d}, cs2_sdk::modules::server->Image(),
-                                                           "smoke list head", error, maxLength));
+    auto head = static_cast<void* const*>(
+        ResolveRipTarget(address.listSite, { 0x48, 0x8b, 0x1d }, cs2_sdk::modules::server->Image(), "smoke list head", error, maxLength));
     if (!head) return false;
     g_config = config;
 
@@ -868,10 +878,10 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     if (!g_destructorDetour.Create(destructor, &HookedGrenadeDestructor) || !g_heDetour.Create(address.heDetonate, &HookedHeDetonate) ||
         !g_pelletDetour.Create(address.pelletTrace, &HookedPelletTrace) || !g_publishDetour.Create(address.publish, &HookedPublish) ||
         !g_resultDetour.Create(address.pelletResult, &HookedResult) || !g_traversalDetour.Create(address.traverse, &HookedTraversal) ||
-        !g_lineDetour.Create(address.density, &HookedLine) ||
-        !g_initializeDetour.Create(address.initialize, &HookedInitializeSmoke) || !g_readyDetour.Create(address.ready, &HookedReady) ||
-        !g_destructorDetour.Enable() || !g_initializeDetour.Enable() || !g_readyDetour.Enable() || !g_publishDetour.Enable() ||
-        !g_resultDetour.Enable() || !g_traversalDetour.Enable() || !g_heDetour.Enable() || !g_pelletDetour.Enable())
+        !g_lineDetour.Create(address.density, &HookedLine) || !g_initializeDetour.Create(address.initialize, &HookedInitializeSmoke) ||
+        !g_readyDetour.Create(address.ready, &HookedReady) || !g_destructorDetour.Enable() || !g_initializeDetour.Enable() ||
+        !g_readyDetour.Enable() || !g_publishDetour.Enable() || !g_resultDetour.Enable() || !g_traversalDetour.Enable() ||
+        !g_heDetour.Enable() || !g_pelletDetour.Enable())
     {
         Remove();
         SetError(error, maxLength, "failed to install smoke effect hooks");
