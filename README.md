@@ -56,8 +56,6 @@ For example, `bv_bot_density 2 0.15` sets the threshold for the bot in slot 2. U
 
 Created by [XBribo](https://github.com/XBribo), with thanks to all contributors.
 
-Smoke effects are adapted from [unicbm/CS2-bot-improver-light](https://github.com/unicbm/CS2-bot-improver-light/tree/1d0230399fcd77030782b7eed5a97a83eae3297d/native/BotVision).
-
 [![BotVision contributors](https://contrib.rocks/image?repo=XBribo/CS2-Bot-Vision)](https://github.com/XBribo/CS2-Bot-Vision/graphs/contributors)
 
 ## License
