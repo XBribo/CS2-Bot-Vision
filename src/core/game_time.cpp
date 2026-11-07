@@ -1,7 +1,6 @@
 #include "game_time.h"
 #include "plugin.h"
 
-#include <engine2/gameshareddefs.h>
 #include <engine2/inetworkserverservice.h>
 #include <engine2/networkgameserverbase.h>
 #include <interfaces/interfaces.h>
@@ -23,7 +22,6 @@ void Reset() { g_serverService = nullptr; }
 Sample Read()
 {
     auto* server = g_serverService ? g_serverService->GetIGameServer() : nullptr;
-    CGlobalVars* globals = server ? server->GetGlobals() : nullptr;
-    return { server, globals ? globals->curtime : std::numeric_limits<float>::quiet_NaN() };
+    return { server, server ? server->GetTime() : std::numeric_limits<float>::quiet_NaN() };
 }
 } // namespace cs2bv::game_time

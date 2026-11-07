@@ -10,6 +10,6 @@ struct Sample
     const void* server;
     float time;
 };
-// Both fields come from the same server. Unavailable time is NaN.
+// Server world time. Unavailable time is NaN.
 Sample Read();
 } // namespace cs2bv::game_time
