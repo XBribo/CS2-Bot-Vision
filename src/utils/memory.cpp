@@ -17,8 +17,6 @@ std::atomic<int> g_lastReadError{ 0 };
 
 bool ReadBytes(const void* address, void* out, size_t size)
 {
-    if (!address || !out || size == 0 || size > UINTPTR_MAX - reinterpret_cast<uintptr_t>(address)) return false;
-
 #ifdef _WIN32
     return cs2_sdk::memory::ReadBytes(address, out, size);
 #else
@@ -47,11 +45,8 @@ bool Initialize(char* error, size_t maxLength)
 }
 #endif
 
-void RecordFailure(FailureDomain domain, [[maybe_unused]] int posixError)
+void RecordFailure(FailureDomain domain)
 {
-#ifndef _WIN32
-    if (posixError) g_lastReadError.store(posixError, std::memory_order_relaxed);
-#endif
     const auto index = static_cast<size_t>(domain);
     if (index < g_failures.size()) g_failures[index].fetch_add(1, std::memory_order_relaxed);
 }
@@ -59,12 +54,8 @@ void RecordFailure(FailureDomain domain, [[maybe_unused]] int posixError)
 const char* Diagnostics()
 {
     static char buffer[224];
-    std::snprintf(buffer, sizeof(buffer),
-                  "scene=%" PRId64 " bot=%" PRId64 " weapon=%" PRId64 " bullet=%" PRId64 " smoke=%" PRId64 " install=%" PRId64,
-                  g_failures[static_cast<size_t>(FailureDomain::Scene)].load(std::memory_order_relaxed),
+    std::snprintf(buffer, sizeof(buffer), "bot=%" PRId64 " smoke=%" PRId64 " install=%" PRId64,
                   g_failures[static_cast<size_t>(FailureDomain::Bot)].load(std::memory_order_relaxed),
-                  g_failures[static_cast<size_t>(FailureDomain::Weapon)].load(std::memory_order_relaxed),
-                  g_failures[static_cast<size_t>(FailureDomain::Bullet)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Smoke)].load(std::memory_order_relaxed),
                   g_failures[static_cast<size_t>(FailureDomain::Install)].load(std::memory_order_relaxed));
 #ifndef _WIN32

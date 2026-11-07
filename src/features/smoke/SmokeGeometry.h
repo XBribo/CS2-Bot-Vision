@@ -15,7 +15,7 @@ struct Geometry
 inline Geometry PrepareGeometry(Vec3 point, const HoleCache::PreparedView& effects)
 {
     const auto bullet = effects.bullets.empty() ? HoleCache::IdentityBullet(point) : HoleCache::SampleBullet(point, effects);
-    return { bullet, !effects.he.empty() ? HoleCache::ApplyHePrepared(bullet.position, 1.0F, effects) : 1.0F };
+    return { bullet, !effects.he.empty() ? HoleCache::HeFactor(bullet.position, effects) : 1.0F };
 }
 
 inline float EvaluateGeometry(const Geometry& geometry, float original, HoleCache::Sampler sample, void* volume)
@@ -35,8 +35,8 @@ class GeometryCache
         Geometry Sample(Vec3 point, uint32_t cell) const
         {
             // Single-bullet bounds are conservative.
-            if (empty_ || (bounds_ && (point.x < bounds_->minimum.x || point.x > bounds_->maximum.x || point.y < bounds_->minimum.y ||
-                                       point.y > bounds_->maximum.y || point.z < bounds_->minimum.z || point.z > bounds_->maximum.z)))
+            if (bounds_ && (point.x < bounds_->minimum.x || point.x > bounds_->maximum.x || point.y < bounds_->minimum.y ||
+                            point.y > bounds_->maximum.y || point.z < bounds_->minimum.z || point.z > bounds_->maximum.z))
                 return { { point, 0 }, 1 };
             return owner_.SampleAt(point, cell, *this);
         }
@@ -45,8 +45,7 @@ class GeometryCache
         friend class GeometryCache;
         View(GeometryCache& owner, HoleCache::PreparedView effects, SmokeKey smoke, uint64_t epoch)
             : owner_(owner), effects_(effects), epoch_(epoch), identity_((uint64_t(smoke.handle) << 32) | uint32_t(smoke.effectTick)),
-              salt_(smoke.handle * 0x9e3779b1U), bounds_(effects.he.empty() && effects.bullets.size() == 1 ? &effects.bullets[0] : nullptr),
-              empty_(effects.Empty())
+              salt_(smoke.handle * 0x9e3779b1U), bounds_(effects.he.empty() && effects.bullets.size() == 1 ? &effects.bullets[0] : nullptr)
         {
         }
         GeometryCache& owner_;
@@ -54,21 +53,16 @@ class GeometryCache
         uint64_t epoch_, identity_;
         uint32_t salt_;
         const HoleCache::PreparedBullet* bounds_;
-        bool empty_;
     };
 
+    // Effects are nonempty.
     View Bind(HoleCache::PreparedView effects, SmokeKey smoke, float now, uint64_t generation)
     {
         if (now != time_ || generation != generation_)
         {
             time_ = now;
             generation_ = generation;
-            if (++epoch_ == 0)
-            {
-                for (auto& entry : entries_)
-                    entry.epoch = 0;
-                ++epoch_;
-            }
+            ++epoch_;
         }
         return View(*this, effects, smoke, epoch_);
     }
@@ -76,10 +70,6 @@ class GeometryCache
     View Bind(const HoleCache::Snapshot&&, SmokeKey, float, uint64_t) = delete;
     View Bind(HoleCache::SmokeView&&, SmokeKey, float, uint64_t) = delete;
     View Bind(const HoleCache::SmokeView&&, SmokeKey, float, uint64_t) = delete;
-    Geometry Sample(Vec3 point, uint32_t cell, SmokeKey smoke, const HoleCache::Snapshot& effects, float now, uint64_t generation)
-    {
-        return Bind(effects, smoke, now, generation).Sample(point, cell);
-    }
     void Reset()
     {
         time_ = std::numeric_limits<float>::quiet_NaN();

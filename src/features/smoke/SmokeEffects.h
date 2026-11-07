@@ -99,7 +99,7 @@ class HoleCache
     static SmokeView ForSmokeView(const Snapshot& snapshot, SmokeKey key, float smokeStart, float now);
     static SmokeView ForSmokeView(Snapshot&&, SmokeKey, float, float) = delete;
     static SmokeView ForSmokeView(const Snapshot&&, SmokeKey, float, float) = delete;
-    static float ApplyHePrepared(Vec3 point, float density, const PreparedView& snapshot);
+    static float HeFactor(Vec3 point, const PreparedView& snapshot);
     // Server voxel density approximates client texture density.
     static float HeContribution(float density, float factor)
     {
@@ -126,7 +126,6 @@ class HoleCache
         if (!std::isfinite(density) || density < 0) return std::numeric_limits<float>::quiet_NaN();
         return ApplyBullet(density, bullet.influence);
     }
-    static float EvaluateCellPrepared(Vec3 point, float original, const PreparedView& snapshot, Sampler sample, void* volume);
 
   private:
     std::array<He, HeCapacity> he_{};

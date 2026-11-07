@@ -166,7 +166,7 @@ void AdjustCell(void* state, CellContext* context, const Vec3* point, std::uint3
     if (frame.query.generation != g_holes.Generation()) return;
     float adjusted;
     if constexpr (DirectHe)
-        adjusted = HoleCache::EvaluateCellPrepared(*point, original, frame.prepared, g_bindings.pointDensity, frame.volume);
+        adjusted = HoleCache::HeContribution(original, HoleCache::HeFactor(HoleCache::IdentityBullet(*point).position, frame.prepared));
     else
     {
         const auto geometry =

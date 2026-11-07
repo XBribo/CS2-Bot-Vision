@@ -193,7 +193,7 @@ HoleCache::SmokeView HoleCache::ForSmokeView(const Snapshot& snapshot, SmokeKey 
     }
     return result;
 }
-float HoleCache::ApplyHePrepared(Vec3 point, float density, const PreparedView& snapshot)
+float HoleCache::HeFactor(Vec3 point, const PreparedView& snapshot)
 {
     float factor = 1;
     for (std::size_t i = 0; i < snapshot.he.size(); ++i)
@@ -209,7 +209,7 @@ float HoleCache::ApplyHePrepared(Vec3 point, float density, const PreparedView& 
         const float warp = (1 - Smooth((d - 100) / 150)) * (d >= 1250 * h.age ? 1.0f : 0.0f) * (1 - h.impulse);
         point = Add(point, Mul(Sub(h.event->center, point), warp));
     }
-    return density * (.02f + .98f * factor);
+    return .02f + .98f * factor;
 }
 void HoleCache::Reset()
 {
@@ -217,11 +217,5 @@ void HoleCache::Reset()
     bullets_ = {};
     heFirst_ = heCount_ = bulletCursor_ = 0;
     ++generation_;
-}
-float HoleCache::EvaluateCellPrepared(Vec3 point, float original, const PreparedView& snapshot, Sampler sample, void* volume)
-{
-    const auto bullet = snapshot.bullets.empty() ? IdentityBullet(point) : SampleBullet(point, snapshot);
-    const float factor = ApplyHePrepared(bullet.position, 1, snapshot);
-    return HeContribution(BulletDensity(bullet, original, sample, volume), factor);
 }
 } // namespace cs2bv::smoke_effects
