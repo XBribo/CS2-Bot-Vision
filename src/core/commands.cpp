@@ -19,6 +19,13 @@ namespace bot_vision = cs2bv::bot_vision;
 using cs2bv::commands::PrintToCaller;
 
 namespace {
+bool CanModify(const CCommandContext& context)
+{
+    if (!context.GetPlayerSlot().IsValid()) return true;
+    PrintToCaller(context, "Use the server console or RCON to change BotVision settings.\n");
+    return false;
+}
+
 bool ReadInt(const CCommandContext& context, const char* argument, int minimum, int maximum, int& value)
 {
     char* end = nullptr;
@@ -93,13 +100,12 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
 {
     const auto [he, bullets] = bot_vision::GetActiveEffectCounts();
     PrintToCaller(context,
-                  "[BotVision] mode=%d model=%s blocked=%lld/%lld heHoles=%d bulletHoles=%d\n"
-                  "[BotVision] autoList=%s geometry_cache=%d hits=%llu misses=%llu\n"
-                  "[BotVision] reads: %s\n",
+                  "[BotVision] mode=%d model=%s blocked=%lld/%lld he=%d bullets=%d\n"
+                  "  list=%s cache=%d hits=%llu misses=%llu\n"
+                  "  reads: %s\n",
                   bot_vision::GetSmokeMode(), bot_vision::GetModelStatus(), static_cast<long long>(bot_vision::GetBlockedCount()),
-                  static_cast<long long>(bot_vision::GetHitCount()), he, bullets,
-                  bot_vision::GetAutoListStatus(), bot_vision::GetGeometryCacheEnabled(),
-                  static_cast<unsigned long long>(bot_vision::GetGeometryCacheHits()),
+                  static_cast<long long>(bot_vision::GetHitCount()), he, bullets, bot_vision::GetAutoListStatus(),
+                  bot_vision::GetGeometryCacheEnabled(), static_cast<unsigned long long>(bot_vision::GetGeometryCacheHits()),
                   static_cast<unsigned long long>(bot_vision::GetGeometryCacheMisses()), bot_vision::GetSafeReadDiag());
 }
 
@@ -107,6 +113,7 @@ CON_COMMAND_F(bv_geometry_cache, "bv_geometry_cache [0|1] - compare cached and u
 {
     if (args.ArgC() >= 2)
     {
+        if (!CanModify(context)) return;
         int enabled = 0;
         if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
         bot_vision::SetGeometryCacheEnabled(enabled != 0);
@@ -134,15 +141,16 @@ CON_COMMAND_F(bv_test_los, // NOLINT(misc-use-anonymous-namespace,bugprone-throw
 }
 
 CON_COMMAND_F(bv_smoke_mode, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
-              "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke.",
+              "bv_smoke_mode <0|1>  0=density 1=vanilla.",
               FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
-        PrintToCaller(context, "smoke_mode=%d (0=volume, 1=vanilla) density_threshold=%.3f density=%s\n", bot_vision::GetSmokeMode(),
-                      bot_vision::GetDensityThreshold(), bot_vision::IsDensityFnResolved() ? "resolved" : "missing (vanilla fallback)");
+        PrintToCaller(context, "mode=%d threshold=%.3f model=%s\n", bot_vision::GetSmokeMode(), bot_vision::GetDensityThreshold(),
+                      bot_vision::GetModelStatus());
         return;
     }
+    if (!CanModify(context)) return;
     int mode = 0;
     if (!ReadInt(context, args.Arg(1), 0, 1, mode)) return;
     if (mode == 0 && !bot_vision::IsDensityFnResolved())
@@ -161,6 +169,7 @@ CON_COMMAND_F(bv_density_threshold, // NOLINT(misc-use-anonymous-namespace,bugpr
     if (args.ArgC() >= 2)
     {
         float threshold = 0.0F;
+        if (!CanModify(context)) return;
         if (!ReadDensity(context, args.Arg(1), threshold)) return;
         bot_vision::SetDensityThreshold(threshold);
     }
@@ -176,7 +185,7 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
     {
         if (!bot_vision::IsVisiblePosHooked())
         {
-            PrintToCaller(context, "Bot density unavailable: IsVisiblePos hook missing.\n");
+            PrintToCaller(context, "IsVisiblePos unavailable.\n");
             return;
         }
         PrintToCaller(context,
@@ -203,6 +212,7 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
     if (args.ArgC() >= 3)
     {
         float threshold = 0.0F;
+        if (!CanModify(context)) return;
         if (!ReadDensity(context, args.Arg(2), threshold, true)) return;
         bot_vision::SetBotDensityThreshold(slot, threshold);
     }
@@ -232,6 +242,7 @@ CON_COMMAND_F(bv_reveal, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
         return;
     }
 
+    if (!CanModify(context)) return;
     if (std::strcmp(action, "clear") == 0)
     {
         bot_vision::ClearReveals();
@@ -269,6 +280,7 @@ CON_COMMAND_F(bv_bullet_holes, // NOLINT(misc-use-anonymous-namespace,bugprone-t
 {
     if (args.ArgC() >= 2)
     {
+        if (!CanModify(context)) return;
         int enabled = 0;
         if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
         bot_vision::SetBulletHolesEnabled(enabled != 0);

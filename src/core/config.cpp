@@ -77,7 +77,7 @@ void ApplyStartupConfig(const nlohmann::json& config)
         }
         else
         {
-            BV_LOG_WARN("he_holes radius/duration are fixed (250 units, 5 seconds)");
+            BV_LOG_WARN("he_holes ignored: fixed radius=250 duration=5");
         }
     }
 
@@ -91,7 +91,7 @@ void ApplyStartupConfig(const nlohmann::json& config)
         else
         {
             if (bulletHoles.contains("radius") || bulletHoles.contains("shotgun_radius") || bulletHoles.contains("duration"))
-                BV_LOG_WARN("bullet hole geometry/lifetime use fixed parameters (20/80 units, 1 second)");
+                BV_LOG_WARN("bullet_holes radius/duration ignored: fixed radius=20/80 duration=1");
             if (bulletHoles.contains("enabled"))
             {
                 if (bulletHoles["enabled"].is_boolean()) bot_vision::SetBulletHolesEnabled(bulletHoles["enabled"].get<bool>());

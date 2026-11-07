@@ -167,7 +167,8 @@ KHook::Return<int64_t> HookedIsVisiblePos(int64_t self, int64_t, char, void*) no
     g_isVisiblePosCalls.fetch_add(1, std::memory_order_relaxed);
     g_thresholdFrames.push_back(g_currentBotThresholdMilli);
     g_currentBotThresholdMilli = IsVolumeMode() && g_botThresholdOverrideCount.load(std::memory_order_relaxed) != 0
-                                     ? CachedThresholdFromBot(self) : kDefaultThreshold;
+                                     ? CachedThresholdFromBot(self)
+                                     : kDefaultThreshold;
     return { KHook::Action::Ignore };
 }
 
@@ -252,13 +253,14 @@ bool Install(const nlohmann::json& gamedata, const cs2_sdk::modules::ModuleInfo&
                 if (hook.Install(target, pre, post)) return;
                 reason = "hook registration failed";
             }
-            else reason = detail;
+            else
+                reason = detail;
         }
         hook.Remove();
         BV_LOG_WARN("%s disabled: %s", name, reason);
     };
-    installOptional(g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0, kVisiblePosName, g_visiblePosHook,
-                    &HookedIsVisiblePos, &IsVisiblePosPost);
+    installOptional(g_controllerHandleOffset >= 0 && g_playerInBotOffset > 0, kVisiblePosName, g_visiblePosHook, &HookedIsVisiblePos,
+                    &IsVisiblePosPost);
     installOptional(g_controllerHandleOffset >= 0, kVisiblePlayerName, g_visiblePlayerHook, &HookedIsVisiblePlayer, &IsVisiblePlayerPost);
     return true;
 }
@@ -381,8 +383,7 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
         return static_cast<size_t>(needed) < remaining;
     };
 
-    if (!append("from=(%.1f,%.1f,%.1f) to=(%.1f,%.1f,%.1f)\n", fromX, fromY, fromZ, toX, toY, toZ))
-        return static_cast<int>(written);
+    if (!append("from=(%.1f,%.1f,%.1f) to=(%.1f,%.1f,%.1f)\n", fromX, fromY, fromZ, toX, toY, toZ)) return static_cast<int>(written);
 
     if (smoke_density::Ready())
     {
@@ -392,8 +393,8 @@ int TestLos(float fromX, float fromY, float fromZ, float toX, float toY, float t
         {
             const float threshold = GetDensityThreshold();
             const auto [he, bullets] = smoke_density::ActiveEffectCounts();
-            append("density=%.4f adjusted=%.4f threshold=%.4f engineBlock=%d blocked=%d activeHe=%d activeBullets=%d\n",
-                   raw, adjusted, threshold, BlocksSight(raw, threshold), BlocksSight(adjusted, threshold), he, bullets);
+            append("raw=%.4f adjusted=%.4f threshold=%.4f raw_blocked=%d blocked=%d he=%d bullets=%d\n", raw, adjusted, threshold,
+                   BlocksSight(raw, threshold), BlocksSight(adjusted, threshold), he, bullets);
             return static_cast<int>(written);
         }
     }
