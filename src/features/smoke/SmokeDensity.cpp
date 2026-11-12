@@ -326,7 +326,8 @@ const char* Status() { return g_fault ? g_fault.load() : g_ready ? "native-voxel
 std::pair<int, int> ActiveEffectCounts()
 {
     if (!MainThread() || !g_ready) return {};
-    const auto effects = g_holes.Prepare(Now());
+    const float now = Now();
+    const auto& effects = EffectsAt(now, g_holes.Generation());
     return { static_cast<int>(effects.heCount), static_cast<int>(effects.bulletCount) };
 }
 void EnableBullets(bool enabled)
