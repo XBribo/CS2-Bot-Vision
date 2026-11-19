@@ -1,0 +1,32 @@
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].number &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/submodules/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge the verified submodule update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          revision=$(gh pr view "$PR" --json author,baseRefName,state,files,changedFiles,headRefOid --jq '
+            select(.author.login == "app/dependabot" and .baseRefName == "main" and .state == "OPEN" and .changedFiles == 1)
+            | "\(.headRefOid):\(.files[0].path)"')
+          [[ "$revision" == "$SHA:src/core/cs2_sdk" ]] || exit 0
+          gh pr merge "$PR" --auto --merge --match-head-commit "$SHA"
