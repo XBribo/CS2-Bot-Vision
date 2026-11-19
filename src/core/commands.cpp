@@ -19,7 +19,13 @@ namespace bot_vision = cs2bv::bot_vision;
 using cs2bv::commands::PrintToCaller;
 
 namespace {
-// Reads a bounded integer argument.
+bool CanModify(const CCommandContext& context)
+{
+    if (!cs2bv::config::AreCommandsServerOnly() || !context.GetPlayerSlot().IsValid()) return true;
+    PrintToCaller(context, "Use the server console or RCON to change BotVision settings.\n");
+    return false;
+}
+
 bool ReadInt(const CCommandContext& context, const char* argument, int minimum, int maximum, int& value)
 {
     char* end = nullptr;
@@ -34,7 +40,6 @@ bool ReadInt(const CCommandContext& context, const char* argument, int minimum, 
     return true;
 }
 
-// Reads a finite float argument.
 bool ReadFloat(const CCommandContext& context, const char* argument, float& value)
 {
     char* end = nullptr;
@@ -49,13 +54,11 @@ bool ReadFloat(const CCommandContext& context, const char* argument, float& valu
     return true;
 }
 
-// Reads a player slot.
 bool ReadSlot(const CCommandContext& context, const char* argument, int& slot)
 {
     return ReadInt(context, argument, 0, bot_vision::GetMaxBots() - 1, slot);
 }
 
-// Reads a density value or a negative override reset.
 bool ReadDensity(const CCommandContext& context, const char* argument, float& value, bool allowClear = false)
 {
     if (!ReadFloat(context, argument, value)) return false;
@@ -70,7 +73,6 @@ namespace cs2bv::commands {
 
 IVEngineServer2* g_engine = nullptr;
 
-// Prints formatted text to the invoking console
 void PrintToCaller(const CCommandContext& context, const char* fmt, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
     char buf[1024];
@@ -92,21 +94,34 @@ void PrintToCaller(const CCommandContext& context, const char* fmt, ...) // NOLI
 
 } // namespace cs2bv::commands
 
-// Prints aggregate runtime diagnostics
 CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization,misc-unused-parameters)
               "Print BotVision plugin status.",
               FCVAR_NONE)
 {
+    const auto [he, bullets] = bot_vision::GetActiveEffectCounts();
     PrintToCaller(context,
-                  "[BotVision] mode=%d blocked=%lld/%lld heHoles=%d bulletHoles=%d\n"
-                  "[BotVision] autoList=%s density=%s he=%s\n"
-                  "[BotVision] reads: %s\n",
-                  bot_vision::GetSmokeMode(), bot_vision::GetBlockedCount(), bot_vision::GetHitCount(), bot_vision::GetActiveBlastCount(),
-                  bot_vision::GetActiveBulletHoleCount(), bot_vision::GetAutoListStatus(),
-                  bot_vision::IsDensityFnResolved() ? "resolved" : "missing", bot_vision::GetHeHookStatus(), bot_vision::GetSafeReadDiag());
+                  "[BotVision] mode=%d model=%s blocked=%lld/%lld he=%d bullets=%d\n"
+                  "  list=%s cache=%d hits=%llu misses=%llu\n"
+                  "  reads: %s\n",
+                  bot_vision::GetSmokeMode(), bot_vision::GetModelStatus(), static_cast<long long>(bot_vision::GetBlockedCount()),
+                  static_cast<long long>(bot_vision::GetHitCount()), he, bullets, bot_vision::GetAutoListStatus(),
+                  bot_vision::GetGeometryCacheEnabled(), static_cast<unsigned long long>(bot_vision::GetGeometryCacheHits()),
+                  static_cast<unsigned long long>(bot_vision::GetGeometryCacheMisses()), bot_vision::GetSafeReadDiag());
+    if (const char* reason = bot_vision::GetBulletHolesError()) PrintToCaller(context, "  bullet holes unavailable: %s\n", reason);
 }
 
-// Tests smoke density along an explicit line
+CON_COMMAND_F(bv_geometry_cache, "bv_geometry_cache [0|1] - compare cached and uncached smoke geometry.", FCVAR_NONE)
+{
+    if (args.ArgC() >= 2)
+    {
+        if (!CanModify(context)) return;
+        int enabled = 0;
+        if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
+        bot_vision::SetGeometryCacheEnabled(enabled != 0);
+    }
+    PrintToCaller(context, "geometry_cache=%d\n", bot_vision::GetGeometryCacheEnabled());
+}
+
 CON_COMMAND_F(bv_test_los, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
               "bv_test_los x1 y1 z1 x2 y2 z2 - query smoke density along segment.",
               FCVAR_NONE)
@@ -126,24 +141,28 @@ CON_COMMAND_F(bv_test_los, // NOLINT(misc-use-anonymous-namespace,bugprone-throw
     PrintToCaller(context, "%s", buf);
 }
 
-// Reads or changes the smoke calculation mode
 CON_COMMAND_F(bv_smoke_mode, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
-              "bv_smoke_mode <0|1>  0=volume-smoke 1=ball-smoke.",
+              "bv_smoke_mode <0|1>  0=density 1=vanilla.",
               FCVAR_NONE)
 {
     if (args.ArgC() < 2)
     {
-        PrintToCaller(context, "smoke_mode=%d (0=volume, 1=vanilla) density_threshold=%.3f density=%s\n", bot_vision::GetSmokeMode(),
-                      bot_vision::GetDensityThreshold(), bot_vision::IsDensityFnResolved() ? "resolved" : "missing (vanilla fallback)");
+        PrintToCaller(context, "mode=%d threshold=%.3f model=%s\n", bot_vision::GetSmokeMode(), bot_vision::GetDensityThreshold(),
+                      bot_vision::GetModelStatus());
         return;
     }
+    if (!CanModify(context)) return;
     int mode = 0;
     if (!ReadInt(context, args.Arg(1), 0, 1, mode)) return;
+    if (mode == 0 && !bot_vision::IsDensityFnResolved())
+    {
+        PrintToCaller(context, "Smoke density unavailable: %s\n", bot_vision::GetModelStatus());
+        return;
+    }
     bot_vision::SetSmokeMode(mode);
     PrintToCaller(context, "smoke_mode=%d\n", mode);
 }
 
-// Reads or changes the global density threshold
 CON_COMMAND_F(bv_density_threshold, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
               "bv_density_threshold <d>  mode-0 blocking threshold from config.json.",
               FCVAR_NONE)
@@ -151,13 +170,13 @@ CON_COMMAND_F(bv_density_threshold, // NOLINT(misc-use-anonymous-namespace,bugpr
     if (args.ArgC() >= 2)
     {
         float threshold = 0.0F;
+        if (!CanModify(context)) return;
         if (!ReadDensity(context, args.Arg(1), threshold)) return;
         bot_vision::SetDensityThreshold(threshold);
     }
     PrintToCaller(context, "density_threshold=%.3f\n", bot_vision::GetDensityThreshold());
 }
 
-// Lists, reads, or changes per-bot density thresholds
 CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
               "bv_bot_density [<slot> <d>]  per-bot density threshold. "
               "Negative d clears back to global. No args lists all set slots.",
@@ -167,7 +186,7 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
     {
         if (!bot_vision::IsVisiblePosHooked())
         {
-            PrintToCaller(context, "Bot density unavailable: IsVisiblePos hook missing.\n");
+            PrintToCaller(context, "IsVisiblePos unavailable.\n");
             return;
         }
         PrintToCaller(context,
@@ -194,6 +213,7 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
     if (args.ArgC() >= 3)
     {
         float threshold = 0.0F;
+        if (!CanModify(context)) return;
         if (!ReadDensity(context, args.Arg(2), threshold, true)) return;
         bot_vision::SetBotDensityThreshold(slot, threshold);
     }
@@ -203,7 +223,6 @@ CON_COMMAND_F(bv_bot_density, // NOLINT(misc-use-anonymous-namespace,bugprone-th
         PrintToCaller(context, "slot %d density=%.3f\n", slot, threshold);
 }
 
-// Manages players whose smoke visibility checks are bypassed
 CON_COMMAND_F(bv_reveal, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
               "bv_reveal <add|remove|list|clear> [slot].",
               FCVAR_NONE)
@@ -224,6 +243,7 @@ CON_COMMAND_F(bv_reveal, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
         return;
     }
 
+    if (!CanModify(context)) return;
     if (std::strcmp(action, "clear") == 0)
     {
         bot_vision::ClearReveals();
@@ -255,16 +275,17 @@ CON_COMMAND_F(bv_reveal, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
     }
 }
 
-// Enables or disables bullet smoke tunnels
 CON_COMMAND_F(bv_bullet_holes, // NOLINT(misc-use-anonymous-namespace,bugprone-throwing-static-initialization)
               "bv_bullet_holes <0|1>  enable bullet-through-smoke holes from config.json.",
               FCVAR_NONE)
 {
     if (args.ArgC() >= 2)
     {
+        if (!CanModify(context)) return;
         int enabled = 0;
         if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
         bot_vision::SetBulletHolesEnabled(enabled != 0);
     }
-    PrintToCaller(context, "bullet_holes=%d\n", bot_vision::GetBulletHolesEnabled() ? 1 : 0);
+    if (const char* reason = bot_vision::GetBulletHolesError()) PrintToCaller(context, "bullet_holes=0 (unavailable: %s)\n", reason);
+    else PrintToCaller(context, "bullet_holes=%d\n", bot_vision::GetBulletHolesEnabled() ? 1 : 0);
 }

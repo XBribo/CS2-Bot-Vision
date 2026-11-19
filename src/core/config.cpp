@@ -11,55 +11,53 @@ namespace cs2bv::config {
 namespace {
 constexpr int kDefaultSmokeMode = 0;
 constexpr float kDefaultDensityThreshold = 0.23F;
-constexpr float kDefaultHeRadius = 250.0F;
-constexpr float kDefaultHeDuration = 5.0F;
 constexpr bool kDefaultBulletHolesEnabled = true;
-constexpr float kDefaultBulletRadius = 20.0F;
-constexpr float kDefaultShotgunRadius = 80.0F;
-constexpr float kDefaultBulletDuration = 1.0F;
+constexpr bool kDefaultCommandsServerOnly = false;
+bool g_commandsServerOnly = kDefaultCommandsServerOnly;
 
-// Builds the packaged startup configuration
 nlohmann::json BuildDefaultConfig()
 {
-    return { { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
-             { "he_holes", { { "radius", kDefaultHeRadius }, { "duration", kDefaultHeDuration } } },
-             { "bullet_holes",
-               { { "enabled", kDefaultBulletHolesEnabled },
-                 { "radius", kDefaultBulletRadius },
-                 { "shotgun_radius", kDefaultShotgunRadius },
-                 { "duration", kDefaultBulletDuration } } } };
+    return { { "commands", { { "server_only", kDefaultCommandsServerOnly } } },
+             { "smoke", { { "mode", kDefaultSmokeMode }, { "density_threshold", kDefaultDensityThreshold } } },
+             { "bullet_holes", { { "enabled", kDefaultBulletHolesEnabled } } } };
 }
 
-// Reports one invalid startup setting
-void WarnInvalidSetting(const char* setting)
-{
-    BV_LOG_WARN("Invalid config: %s; using default", setting);
-}
+void WarnInvalidSetting(const char* setting) { BV_LOG_WARN("Invalid config: %s; using default", setting); }
 
-// Applies one nonnegative fixed-point startup setting
-void ApplyNonNegativeFloat(const nlohmann::json& section, const char* key, const char* setting, void (*setter)(float))
+void ApplyDensityThreshold(const nlohmann::json& smoke)
 {
-    if (!section.contains(key)) return;
+    if (!smoke.contains("density_threshold")) return;
 
-    const auto& value = section[key];
+    const auto& value = smoke["density_threshold"];
     if (!value.is_number())
     {
-        WarnInvalidSetting(setting);
+        WarnInvalidSetting("smoke.density_threshold");
         return;
     }
 
     const double number = value.get<double>();
     if (!IsValidFixedPointValue(number))
     {
-        WarnInvalidSetting(setting);
+        WarnInvalidSetting("smoke.density_threshold");
         return;
     }
-    setter(static_cast<float>(number));
+    bot_vision::SetDensityThreshold(static_cast<float>(number));
 }
 
-// Applies validated startup settings
 void ApplyStartupConfig(const nlohmann::json& config)
 {
+    if (config.contains("commands"))
+    {
+        const auto& commands = config["commands"];
+        if (!commands.is_object()) WarnInvalidSetting("commands");
+        else if (commands.contains("server_only"))
+        {
+            if (commands["server_only"].is_boolean()) g_commandsServerOnly = commands["server_only"].get<bool>();
+            else
+                WarnInvalidSetting("commands.server_only");
+        }
+    }
+
     if (config.contains("smoke"))
     {
         const auto& smoke = config["smoke"];
@@ -81,23 +79,11 @@ void ApplyStartupConfig(const nlohmann::json& config)
                     WarnInvalidSetting("smoke.mode");
                 }
             }
-            ApplyNonNegativeFloat(smoke, "density_threshold", "smoke.density_threshold", bot_vision::SetDensityThreshold);
+            ApplyDensityThreshold(smoke);
         }
     }
 
-    if (config.contains("he_holes"))
-    {
-        const auto& heHoles = config["he_holes"];
-        if (!heHoles.is_object())
-        {
-            WarnInvalidSetting("he_holes");
-        }
-        else
-        {
-            ApplyNonNegativeFloat(heHoles, "radius", "he_holes.radius", bot_vision::SetHeRadius);
-            ApplyNonNegativeFloat(heHoles, "duration", "he_holes.duration", bot_vision::SetHeDuration);
-        }
-    }
+    if (config.contains("he_holes")) BV_LOG_WARN("he_holes ignored: fixed radius=250 duration=5");
 
     if (config.contains("bullet_holes"))
     {
@@ -108,22 +94,22 @@ void ApplyStartupConfig(const nlohmann::json& config)
         }
         else
         {
+            if (bulletHoles.contains("radius") || bulletHoles.contains("shotgun_radius") || bulletHoles.contains("duration"))
+                BV_LOG_WARN("bullet_holes radius/duration ignored: fixed radius=20/80 duration=1");
             if (bulletHoles.contains("enabled"))
             {
                 if (bulletHoles["enabled"].is_boolean()) bot_vision::SetBulletHolesEnabled(bulletHoles["enabled"].get<bool>());
                 else
                     WarnInvalidSetting("bullet_holes.enabled");
             }
-            ApplyNonNegativeFloat(bulletHoles, "radius", "bullet_holes.radius", bot_vision::SetBulletRadius);
-            ApplyNonNegativeFloat(bulletHoles, "shotgun_radius", "bullet_holes.shotgun_radius", bot_vision::SetBulletRadiusShotgun);
-            ApplyNonNegativeFloat(bulletHoles, "duration", "bullet_holes.duration", bot_vision::SetBulletDuration);
         }
     }
 }
 
 } // namespace
 
-// Checks the stored milli-unit range.
+bool AreCommandsServerOnly() { return g_commandsServerOnly; }
+
 bool IsValidFixedPointValue(double value)
 {
     const double maximum = static_cast<double>(std::numeric_limits<int>::max());
@@ -131,7 +117,6 @@ bool IsValidFixedPointValue(double value)
     return static_cast<double>(static_cast<float>(value) * 1000.0F) <= maximum;
 }
 
-// Loads config.json beside gamedata.json and creates it when missing
 void LoadStartupConfig(const std::string& gamedataPath)
 {
     const nlohmann::json defaults = BuildDefaultConfig();
@@ -164,6 +149,4 @@ void LoadStartupConfig(const std::string& gamedataPath)
     ApplyStartupConfig(config);
 }
 
-
-
-}
+} // namespace cs2bv::config

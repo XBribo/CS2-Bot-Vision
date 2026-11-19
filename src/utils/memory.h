@@ -9,10 +9,7 @@
 namespace cs2bv::memory {
 enum class FailureDomain : uint8_t
 {
-    Scene,
     Bot,
-    Weapon,
-    Bullet,
     Smoke,
     Install,
     Count
@@ -29,8 +26,8 @@ bool Initialize(char* error, size_t maxLength);
 // Reads bytes and retains Linux errno; failure may partially fill out.
 bool ReadBytes(const void* address, void* out, size_t size);
 
-// Records a failed read and optional POSIX error.
-void RecordFailure(FailureDomain domain, int posixError = 0);
+// Records a failed read.
+void RecordFailure(FailureDomain domain);
 
 // Returns a borrowed buffer, overwritten on the next call.
 const char* Diagnostics();

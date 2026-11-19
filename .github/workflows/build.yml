@@ -23,7 +23,6 @@ permissions:
   contents: read
 
 jobs:
-  # Extracts the plugin version and validates release preconditions
   guard:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -56,7 +55,6 @@ jobs:
           fi
           echo "releasing v$VERSION"
 
-  # Builds and assembles the complete Windows package
   windows:
     if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'windows'
     needs: guard
@@ -67,26 +65,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build package
-        shell: pwsh
-        run: ./build.ps1 -Windows
+      - name: Configure + build
+        run: |
+          cmake -B build -A x64 -S .
+          cmake --build build --config Release
 
       - name: Verify package
         shell: bash
         run: |
-          test -f dist/windows/addons/BotVision/bin/win64/BotVision.dll
-          test -f dist/windows/addons/metamod/BotVision.vdf
-          test ! -e dist/windows/addons/metamod/BotVision.linux.vdf
+          test -f build/package/addons/BotVision/bin/win64/BotVision.dll
+          test -f build/package/addons/metamod/BotVision.vdf
+          test ! -e build/package/addons/metamod/BotVision.linux.vdf
 
       - name: Upload package
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: BotVision-Windows-${{ needs.guard.outputs.version }}
-          path: dist/windows/
+          path: build/package/
           if-no-files-found: error
 
-  # Builds and assembles the complete Linux package
   linux:
     if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'linux'
     needs: guard
@@ -128,7 +126,6 @@ jobs:
           path: build/package/
           if-no-files-found: error
 
-  # Publishes both platform packages
   release:
     if: inputs.release
     needs: [guard, windows, linux]

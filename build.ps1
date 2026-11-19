@@ -11,7 +11,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Use UTF-8 for build output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -24,13 +23,10 @@ if (-not ($Windows -or $Linux)) {
     $Linux = $true
 }
 
-# Print a build step heading
 function Write-Step([string]$Message) { Write-Host "`n=== $Message ===" -ForegroundColor Cyan }
 
-# Print a successful build result
 function Write-Ok([string]$Message) { Write-Host "  $Message" -ForegroundColor Green }
 
-# Convert a Windows path to a WSL mount path
 function ConvertTo-WslPath([string]$Path) {
     $full = (Resolve-Path -LiteralPath $Path).Path
     $drive = $full.Substring(0, 1).ToLower()
@@ -53,7 +49,6 @@ if ($Clean) {
     }
 }
 
-# Configure and build the Windows plugin
 function Build-Windows {
     Write-Step "Windows"
     $BuildDir = Join-Path $Root "build"
@@ -71,7 +66,6 @@ function Build-Windows {
     return $Package
 }
 
-# Configure and build the Linux plugin through WSL
 function Build-Linux {
     Write-Step "Linux (WSL: $WslDistro)"
     $SourceWsl = ConvertTo-WslPath $Root
@@ -97,7 +91,6 @@ echo "BUILD_OK"
     return $Stage
 }
 
-# Assemble one platform package
 function Build-Dist([string]$Package, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination) {
         Remove-Item -LiteralPath $Destination -Recurse -Force

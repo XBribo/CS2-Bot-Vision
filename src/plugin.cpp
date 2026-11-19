@@ -1,5 +1,6 @@
 #include "core/log.h"
 #include "plugin.h"
+#include "plugin_build_info.h"
 #include <ISmmPluginExt.h>
 
 #include <cstdio>
@@ -28,7 +29,6 @@ ISchemaSystem* g_schemaSystem = nullptr;
 
 namespace cs2bv {
 namespace {
-// Releases runtime state.
 void ClearRuntime()
 {
     bot_vision::Remove();
@@ -49,7 +49,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
     if (!log::Init(ismm->GetBaseDir(), "BotVision", error, maxlen)) return false;
 
-    // Reports failure and rolls back initialization.
     const auto fail = [error, maxlen](const char* reason) {
         if (error && maxlen > 0) std::snprintf(error, maxlen, "%s", reason);
         BV_LOG_ERROR("Load failed: %s", reason);
@@ -82,7 +81,6 @@ bool BotVisionPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
     if (gamedataPath.empty()) return fail("Gamedata path unavailable");
     if (!bot_vision::Install(gamedataPath, detail, sizeof(detail))) return fail(detail);
 
-    // Register commands after successful initialization.
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
     BV_LOG_INFO("Loaded %s", GetVersion());
     return true;
