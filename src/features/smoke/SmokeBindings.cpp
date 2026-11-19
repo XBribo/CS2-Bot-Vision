@@ -107,11 +107,56 @@ bool LoadConfiguration(const nlohmann::json& data, size_t projectileSize, Config
            read("SmokeLayout.origin", config.volumeOriginOffset, sizeof(Vec3), volumeSpan) &&
            read("SmokeLayout.source_count", config.sourceCountOffset, sizeof(int), volumeSpan) &&
            read("SmokeLayout.source_data", config.sourceDataOffset, sizeof(void*), volumeSpan) &&
-           read("SmokeLayout.source_capacity", config.sourceCapacityOffset, sizeof(int), volumeSpan) &&
-           read("SmokeLayout.shooter", config.pelletShooterOffset, sizeof(void*), kMaxFieldSpan);
+           read("SmokeLayout.source_capacity", config.sourceCapacityOffset, sizeof(int), volumeSpan);
 }
 
+struct Field
+{
+    const char *type, *name;
+    std::size_t width;
+    std::size_t* offset;
+};
+bool ResolveFields(std::span<const Field> fields, char* error, size_t maxLength)
+{
+    for (const auto& field : fields)
+        if (!ResolveOffset(field.type, field.name, field.width, *field.offset, error, maxLength)) return false;
+    return true;
+}
 } // namespace
+
+bool ResolveBullets(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& server, BulletBindings& bullets, char* error, size_t maxLength)
+{
+    BulletBindings resolved;
+    CGameTrace trace;
+    const auto* base = reinterpret_cast<const char*>(&trace);
+    if (reinterpret_cast<const char*>(&trace.m_vStartPos) - base != 0x78 || reinterpret_cast<const char*>(&trace.m_vEndPos) - base != 0x84)
+    {
+        SetError(error, maxLength, "SDK pellet trace layout differs from validated game");
+        return false;
+    }
+    const int shooter = cs2_sdk::gameconfig::FindPlatformOffset(data, "SmokeLayout.shooter", -1);
+    if (!FitsField(shooter, sizeof(void*), kMaxFieldSpan))
+    {
+        SetError(error, maxLength, "missing or out-of-bounds SmokeLayout.shooter (%d)", shooter);
+        return false;
+    }
+    resolved.shooter = static_cast<size_t>(shooter);
+    const Field fields[]{
+        { "CBasePlayerPawn", "m_pWeaponServices", sizeof(void*), &resolved.weapons },
+        { "CPlayer_WeaponServices", "m_hActiveWeapon", sizeof(std::uint32_t), &resolved.activeWeapon },
+        { "CEconEntity", "m_AttributeManager", sizeof(void*), &resolved.attributes },
+        { "CAttributeContainer", "m_Item", sizeof(void*), &resolved.item },
+        { "CEconItemView", "m_iItemDefinitionIndex", sizeof(std::uint16_t), &resolved.definition },
+    };
+    if (!ResolveFields(fields, error, maxLength)) return false;
+    const auto sig = [&](const char* name) { return cs2_sdk::gameconfig::ResolveSig(data, server, name, error, maxLength); };
+    if (!(resolved.pelletTrace = sig("BulletPelletTrace")) || !(resolved.pelletResult = sig("BulletPelletTraceResult")) ||
+        !(resolved.pointDensity = reinterpret_cast<PointDensity>(sig("SmokeVolume::PointDensity"))) ||
+        !(resolved.getSlot = reinterpret_cast<GetSlot>(sig("CCSPlayer_WeaponServices::GetSlot"))))
+        return false;
+    bullets = resolved;
+    return true;
+}
 
 bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& server, Bindings& bindings, char* error, size_t maxLength)
 {
@@ -120,8 +165,7 @@ bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     const auto offset = [&](const void* field) {
         return static_cast<const char*>(field) - reinterpret_cast<const char*>(&traceLayout);
     };
-    if (offset(&traceLayout.m_vStartPos) != 0x78 || offset(&traceLayout.m_vEndPos) != 0x84 || offset(&traceLayout.m_flFraction) != 0xac ||
-        offset(&traceLayout.m_bStartInSolid) != 0xbb)
+    if (offset(&traceLayout.m_flFraction) != 0xac || offset(&traceLayout.m_bStartInSolid) != 0xbb)
     {
         SetError(error, maxLength, "SDK trace layout differs from validated game");
         return false;
@@ -137,25 +181,13 @@ bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     }
     Configuration config;
     if (!LoadConfiguration(data, static_cast<size_t>(projectile->m_nSizeOf), config, error, maxLength)) return false;
-    struct Field
-    {
-        const char *type, *name;
-        std::size_t width;
-        std::size_t* offset;
-    };
     const Field fields[]{
         { "CBaseCSGrenadeProjectile", "m_vecExplodeEffectOrigin", sizeof(Vec3), &resolved.fields.effectOrigin },
         { "CBaseCSGrenadeProjectile", "m_nExplodeEffectTickBegin", sizeof(int), &resolved.fields.effectTick },
         { "CSmokeGrenadeProjectile", "m_nSmokeEffectTickBegin", sizeof(int), &resolved.fields.smokeTick },
         { "CSmokeGrenadeProjectile", "m_bDidSmokeEffect", sizeof(bool), &resolved.fields.didSmoke },
-        { "CBasePlayerPawn", "m_pWeaponServices", sizeof(void*), &resolved.fields.weapons },
-        { "CPlayer_WeaponServices", "m_hActiveWeapon", sizeof(std::uint32_t), &resolved.fields.activeWeapon },
-        { "CEconEntity", "m_AttributeManager", sizeof(void*), &resolved.fields.attributes },
-        { "CAttributeContainer", "m_Item", sizeof(void*), &resolved.fields.item },
-        { "CEconItemView", "m_iItemDefinitionIndex", sizeof(std::uint16_t), &resolved.fields.definition },
     };
-    for (const auto& field : fields)
-        if (!ResolveOffset(field.type, field.name, field.width, *field.offset, error, maxLength)) return false;
+    if (!ResolveFields(fields, error, maxLength)) return false;
     // List and volume offsets follow m_bDidSmokeEffect.
     if (resolved.fields.didSmoke < 12 || config.nextOffset != resolved.fields.didSmoke - 12 ||
         config.volumeOffset != resolved.fields.didSmoke + 84)
@@ -165,8 +197,8 @@ bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     }
     struct
     {
-        void *visibility, *density, *heDetonate, *pelletTrace, *listSite, *publish;
-        void *pelletResult, *traverse, *visitorSite, *pointDensity, *getSlot, *initialize, *ready;
+        void *visibility, *density, *heDetonate, *listSite, *publish;
+        void *traverse, *visitorSite, *initialize, *ready;
     } address{};
     struct Signature
     {
@@ -175,11 +207,9 @@ bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     };
     const Signature required[]{
         { "CBotManager::IsVisibleThroughSmoke", address.visibility }, { "GetSmokeDensityInLine", address.density },
-        { "CHEGrenadeProjectile::Detonate", address.heDetonate },     { "BulletPelletTrace", address.pelletTrace },
+        { "CHEGrenadeProjectile::Detonate", address.heDetonate },     { "SmokeVolume::Traverse", address.traverse },
         { "g_AutoList_SmokeProj_Head_Server", address.listSite },     { "CBaseCSGrenadeProjectile::PublishEffect", address.publish },
-        { "BulletPelletTraceResult", address.pelletResult },          { "SmokeVolume::Traverse", address.traverse },
-        { "SmokeVolume::DensityVisitor", address.visitorSite },       { "SmokeVolume::PointDensity", address.pointDensity },
-        { "CCSPlayer_WeaponServices::GetSlot", address.getSlot },     { "SmokeVolume::InitializeReady", address.initialize },
+        { "SmokeVolume::DensityVisitor", address.visitorSite },       { "SmokeVolume::InitializeReady", address.initialize },
         { "CSmokeGrenadeProjectile::Ready", address.ready },
     };
     for (const auto& binding : required)
@@ -208,17 +238,13 @@ bool Resolve(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     resolved.config = config;
     resolved.visibility = address.visibility;
     resolved.heDetonate = address.heDetonate;
-    resolved.pelletTrace = address.pelletTrace;
     resolved.publish = address.publish;
-    resolved.pelletResult = address.pelletResult;
     resolved.traverse = address.traverse;
     resolved.initialize = address.initialize;
     resolved.ready = address.ready;
     resolved.destructor = destructor;
     resolved.density = reinterpret_cast<GetSmokeDensityInLine>(address.density);
-    resolved.pointDensity = reinterpret_cast<PointDensity>(address.pointDensity);
     resolved.traceShape = reinterpret_cast<TraceShape>(traceShape);
-    resolved.getSlot = reinterpret_cast<GetSlot>(address.getSlot);
     resolved.smokeListHead = head;
     resolved.visitor = visitor;
     bindings = resolved;

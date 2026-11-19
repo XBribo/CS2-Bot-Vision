@@ -68,6 +68,7 @@ uint64_t GetGeometryCacheMisses() { return smoke_density::CacheMisses(); }
 void SetBulletHolesEnabled(bool enabled) { smoke_density::EnableBullets(enabled); }
 
 bool GetBulletHolesEnabled() { return smoke_density::BulletsEnabled(); }
+const char* GetBulletHolesError() { return smoke_density::BulletError(); }
 
 int64_t GetHitCount() { return smoke_vision::GetHitCount(); }
 

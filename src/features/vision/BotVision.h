@@ -18,6 +18,7 @@ uint64_t GetGeometryCacheHits();
 uint64_t GetGeometryCacheMisses();
 void SetBulletHolesEnabled(bool enabled);
 bool GetBulletHolesEnabled();
+const char* GetBulletHolesError();
 
 int64_t GetHitCount();
 

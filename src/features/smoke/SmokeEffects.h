@@ -118,9 +118,13 @@ class HoleCache
         return density * ratio;
     }
     using Sampler = float (*)(void*, const Vec3*);
-    static float BulletDensity(BulletSample bullet, float original, Sampler sample, void* volume)
+    static float BulletDensity(Vec3 cellCenter, BulletSample bullet, float original, Sampler sample, void* volume)
     {
         if (bullet.influence <= 0) return original;
+        // Point sampling misses neighbor contributions from the native traversal.
+        const auto inCell = [](float offset) { return offset >= -10.0F && offset < 10.0F; };
+        if (inCell(bullet.position.x - cellCenter.x) && inCell(bullet.position.y - cellCenter.y) && inCell(bullet.position.z - cellCenter.z))
+            return ApplyBullet(original, bullet.influence);
         const float density = sample(volume, &bullet.position);
         if (!std::isfinite(density) || density < 0) return std::numeric_limits<float>::quiet_NaN();
         return ApplyBullet(density, bullet.influence);

@@ -16,6 +16,7 @@ const char* Status();
 std::pair<int, int> ActiveEffectCounts();
 void EnableBullets(bool enabled);
 bool BulletsEnabled();
+const char* BulletError();
 void EnableGeometryCache(bool enabled);
 bool GeometryCacheEnabled();
 uint64_t CacheHits();

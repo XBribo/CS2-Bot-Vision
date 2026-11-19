@@ -17,7 +17,8 @@ bool CreateEventHooks();
 bool CreateSourceHooks();
 // Enable observers before traversal, then emitters.
 bool EnableObservers();
-bool EnableEmitters();
+bool EnableHeEmitter();
+bool InstallBulletHooks();
 void RemoveEventHooks();
 void RemoveSourceHooks();
 void Clear();

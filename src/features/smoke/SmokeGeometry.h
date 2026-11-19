@@ -18,9 +18,9 @@ inline Geometry PrepareGeometry(Vec3 point, const HoleCache::PreparedView& effec
     return { bullet, !effects.he.empty() ? HoleCache::HeFactor(bullet.position, effects) : 1.0F };
 }
 
-inline float EvaluateGeometry(const Geometry& geometry, float original, HoleCache::Sampler sample, void* volume)
+inline float EvaluateGeometry(const Geometry& geometry, Vec3 cellCenter, float original, HoleCache::Sampler sample, void* volume)
 {
-    return HoleCache::HeContribution(HoleCache::BulletDensity(geometry.bullet, original, sample, volume), geometry.heFactor);
+    return HoleCache::HeContribution(HoleCache::BulletDensity(cellCenter, geometry.bullet, original, sample, volume), geometry.heFactor);
 }
 
 // Cache keys use smoke handle, effect tick and exact coordinates.

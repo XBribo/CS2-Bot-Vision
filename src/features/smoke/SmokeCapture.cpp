@@ -283,16 +283,17 @@ float WeaponScale(void* pawn)
 {
     void* services = nullptr;
     std::uint32_t active = 0xffffffffu;
-    if (!ReadAt(pawn, g_bindings->fields.weapons, services) || !services || !ReadAt(services, g_bindings->fields.activeWeapon, active) ||
+    const auto& bullets = g_bindings->bullets;
+    if (!ReadAt(pawn, bullets.weapons, services) || !services || !ReadAt(services, bullets.activeWeapon, active) ||
         active == 0xffffffffu)
         return 0;
     // Pellets use the active primary or secondary weapon.
     for (int slot = 0; slot < 2; ++slot)
     {
-        auto* weapon = static_cast<CEntityInstance*>(g_bindings->getSlot(services, slot, 0xffffffffu));
+        auto* weapon = static_cast<CEntityInstance*>(bullets.getSlot(services, slot, 0xffffffffu));
         if (!weapon || !weapon->m_pEntity || weapon->GetRefEHandle().ToInt() != active) continue;
         std::uint16_t definition = 0;
-        if (!ReadAt(weapon, g_bindings->fields.attributes + g_bindings->fields.item + g_bindings->fields.definition, definition)) return 0;
+        if (!ReadAt(weapon, bullets.attributes + bullets.item + bullets.definition, definition)) return 0;
         return definition == 25 || definition == 27 || definition == 29 || definition == 35 ? .25f : 1.0f;
     }
     return 0;
@@ -379,7 +380,7 @@ KHook::Return<std::int64_t> HookedPelletTrace(std::int64_t a1,
     {
         frame.time = g_runtime.readClock().time;
         void* pawn = nullptr;
-        if (!ReadAt(reinterpret_cast<void*>(a1), g_bindings->config.pelletShooterOffset, pawn))
+        if (!ReadAt(reinterpret_cast<void*>(a1), g_bindings->bullets.shooter, pawn))
             g_runtime.fault("invalid pellet shooter context");
         else
             frame.scale = WeaponScale(pawn);
@@ -396,6 +397,12 @@ KHook::Return<std::int64_t> HookedPelletTrace(std::int64_t a1,
     return result;
 }
 
+void RemoveBulletHooks()
+{
+    g_pelletDetour.Reset();
+    g_resultDetour.Reset();
+}
+
 } // namespace
 
 void Initialize(const smoke_bindings::Bindings& bindings, Runtime runtime)
@@ -408,8 +415,7 @@ bool CreateEventHooks()
 {
     return g_destructorDetour.Create(g_bindings->destructor, &HookedGrenadeDestructor) &&
            g_heDetour.Create(g_bindings->heDetonate, &HookedHeDetonate) &&
-           g_pelletDetour.Create(g_bindings->pelletTrace, &HookedPelletTrace) &&
-           g_publishDetour.Create(g_bindings->publish, &HookedPublish) && g_resultDetour.Create(g_bindings->pelletResult, &HookedResult);
+           g_publishDetour.Create(g_bindings->publish, &HookedPublish);
 }
 bool CreateSourceHooks()
 {
@@ -418,16 +424,23 @@ bool CreateSourceHooks()
 }
 bool EnableObservers()
 {
-    return g_destructorDetour.Enable() && g_initializeDetour.Enable() && g_readyDetour.Enable() && g_publishDetour.Enable() &&
-           g_resultDetour.Enable();
+    return g_destructorDetour.Enable() && g_initializeDetour.Enable() && g_readyDetour.Enable() && g_publishDetour.Enable();
 }
-bool EnableEmitters() { return g_heDetour.Enable() && g_pelletDetour.Enable(); }
+bool EnableHeEmitter() { return g_heDetour.Enable(); }
+bool InstallBulletHooks()
+{
+    const auto& bullets = g_bindings->bullets;
+    if (g_resultDetour.Create(bullets.pelletResult, &HookedResult) && g_pelletDetour.Create(bullets.pelletTrace, &HookedPelletTrace) &&
+        g_resultDetour.Enable() && g_pelletDetour.Enable())
+        return true;
+    RemoveBulletHooks();
+    return false;
+}
 void RemoveEventHooks()
 {
-    g_pelletDetour.Reset();
+    RemoveBulletHooks();
     g_heDetour.Reset();
     g_destructorDetour.Reset();
-    g_resultDetour.Reset();
     g_publishDetour.Reset();
 }
 void RemoveSourceHooks()
@@ -450,5 +463,5 @@ void ResetEffects(bool clearSources)
 }
 const HoleCache& Effects() { return g_holes; }
 void EnableBullets(bool enabled) { g_bulletsEnabled = enabled; }
-bool BulletsEnabled() { return g_bulletsEnabled.load(); }
+bool BulletsEnabled() { return g_pelletDetour.Enabled() && g_bulletsEnabled.load(); }
 } // namespace cs2bv::smoke_capture

@@ -49,6 +49,7 @@ float g_lastTime = -1;
 std::thread::id g_serverThread;
 bool g_cacheEnabled = true;
 bool g_ready = false;
+char g_bulletError[256]{};
 // Only the server thread logs faults and changes smoke state.
 std::atomic<const char*> g_fault{ nullptr };
 bool g_faultReported = false;
@@ -171,7 +172,7 @@ void AdjustCell(void* state, CellContext* context, const Vec3* point, std::uint3
     {
         const auto geometry =
             frame.geometry ? frame.geometry->Sample(*point, cell) : smoke_effects::PrepareGeometry(*point, frame.prepared);
-        adjusted = smoke_effects::EvaluateGeometry(geometry, original, g_bindings.pointDensity, frame.volume);
+        adjusted = smoke_effects::EvaluateGeometry(geometry, *point, original, g_bindings.bullets.pointDensity, frame.volume);
     }
     if (!std::isfinite(adjusted) || adjusted < 0)
     {
@@ -288,12 +289,16 @@ bool Install(const nlohmann::json& data, const cs2_sdk::modules::ModuleInfo& ser
     g_geometry.Reset();
     if (!smoke_capture::CreateEventHooks() || !g_traversalDetour.Create(g_bindings.traverse, &HookedTraversal) ||
         !g_lineDetour.Create(reinterpret_cast<void*>(g_bindings.density), &HookedLine) || !smoke_capture::CreateSourceHooks() ||
-        !smoke_capture::EnableObservers() || !g_traversalDetour.Enable() || !smoke_capture::EnableEmitters())
+        !smoke_capture::EnableObservers() || !g_traversalDetour.Enable() || !smoke_capture::EnableHeEmitter())
     {
         Remove();
         if (error && maxLength) std::snprintf(error, maxLength, "failed to install smoke effect hooks");
         return false;
     }
+    g_bulletError[0] = '\0';
+    if (smoke_bindings::ResolveBullets(data, server, g_bindings.bullets, g_bulletError, sizeof(g_bulletError)) && !smoke_capture::InstallBulletHooks())
+        std::snprintf(g_bulletError, sizeof(g_bulletError), "failed to install pellet hooks");
+    if (*g_bulletError) BV_LOG_WARN("Bullet holes unavailable: %s", g_bulletError);
     auto* game = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
     if (!game || !g_frameHook.emplace(&ISource2Server::GameFrame, nullptr, &AfterGameFrame).Attach(game))
     {
@@ -337,6 +342,7 @@ void EnableBullets(bool enabled)
     g_geometry.Reset();
 }
 bool BulletsEnabled() { return smoke_capture::BulletsEnabled(); }
+const char* BulletError() { return !Ready() ? Status() : *g_bulletError ? g_bulletError : nullptr; }
 void EnableGeometryCache(bool enabled)
 {
     g_cacheEnabled = enabled;

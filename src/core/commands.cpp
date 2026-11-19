@@ -107,6 +107,7 @@ CON_COMMAND_F(bv_status, // NOLINT(misc-use-anonymous-namespace,bugprone-throwin
                   static_cast<long long>(bot_vision::GetHitCount()), he, bullets, bot_vision::GetAutoListStatus(),
                   bot_vision::GetGeometryCacheEnabled(), static_cast<unsigned long long>(bot_vision::GetGeometryCacheHits()),
                   static_cast<unsigned long long>(bot_vision::GetGeometryCacheMisses()), bot_vision::GetSafeReadDiag());
+    if (const char* reason = bot_vision::GetBulletHolesError()) PrintToCaller(context, "  bullet holes unavailable: %s\n", reason);
 }
 
 CON_COMMAND_F(bv_geometry_cache, "bv_geometry_cache [0|1] - compare cached and uncached smoke geometry.", FCVAR_NONE)
@@ -285,5 +286,6 @@ CON_COMMAND_F(bv_bullet_holes, // NOLINT(misc-use-anonymous-namespace,bugprone-t
         if (!ReadInt(context, args.Arg(1), 0, 1, enabled)) return;
         bot_vision::SetBulletHolesEnabled(enabled != 0);
     }
-    PrintToCaller(context, "bullet_holes=%d\n", bot_vision::GetBulletHolesEnabled() ? 1 : 0);
+    if (const char* reason = bot_vision::GetBulletHolesError()) PrintToCaller(context, "bullet_holes=0 (unavailable: %s)\n", reason);
+    else PrintToCaller(context, "bullet_holes=%d\n", bot_vision::GetBulletHolesEnabled() ? 1 : 0);
 }
