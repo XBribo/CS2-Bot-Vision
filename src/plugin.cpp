@@ -16,8 +16,8 @@
 #include "features/vision/BotVision.h"
 #include "core/commands.h"
 #include "core/game_time.h"
-#include "core/cs2_sdk/src/core/gameconfig.h"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/gameconfig.h>
+#include <cs2_sdk/schema.h>
 #include "utils/memory.h"
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
-#include "core/cs2_sdk/src/utils/memory.h"
+#include <cs2_sdk/memory.h>
 
 namespace cs2bv::memory {
 enum class FailureDomain : uint8_t
