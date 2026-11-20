@@ -1,15 +1,15 @@
 #include "core/config.h"
 #include "core/log.h"
-#include "core/cs2_sdk/src/core/gameconfig.h"
+#include <cs2_sdk/gameconfig.h>
 
 #include "BotVision.h"
 
 #include "features/smoke/SmokeVision.h"
 #include "features/smoke/SmokeDensity.h"
 #include "memory.h"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/schema.h>
 #include "plugin.h"
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 
 #include <nlohmann/json.hpp>
 #include <tier0/dbg.h>
@@ -22,14 +22,7 @@ namespace cs2bv::bot_vision {
 bool Install(const std::string& gamedataPath, char* error, size_t maxLength)
 {
     nlohmann::json gamedata;
-    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
-    {
-        if (error && maxLength > 0)
-        {
-            std::snprintf(error, maxLength, "Cannot read/parse gamedata: %s", gamedataPath.c_str());
-        }
-        return false;
-    }
+    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata, error, maxLength)) return false;
 
     config::LoadStartupConfig(gamedataPath);
 

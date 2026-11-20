@@ -1,7 +1,7 @@
 #include "SmokeBindings.h"
-#include "core/cs2_sdk/src/core/schema.h"
-#include "core/cs2_sdk/src/core/gameconfig.h"
-#include "core/cs2_sdk/src/utils/rtti.h"
+#include <cs2_sdk/schema.h>
+#include <cs2_sdk/gameconfig.h>
+#include <cs2_sdk/rtti.h>
 #include "utils/memory.h"
 #include "plugin.h"
 #include <array>

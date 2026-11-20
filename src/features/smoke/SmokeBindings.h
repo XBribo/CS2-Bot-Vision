@@ -1,6 +1,6 @@
 #pragma once
 #include "SmokeEffects.h"
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 #include <nlohmann/json_fwd.hpp>
 
 struct Ray_t;
