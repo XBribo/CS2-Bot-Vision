@@ -1,8 +1,8 @@
 #pragma once
 
 #include "SmokeEffects.h"
-#include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace cs2bv::smoke_effects {
@@ -105,7 +105,9 @@ class GeometryCache
     std::array<Reuse, 64> reuse_{};
     Geometry SampleAt(Vec3 point, uint32_t cell, const View& view)
     {
-        const auto coordinates = std::bit_cast<std::array<uint32_t, 3>>(point);
+        std::array<uint32_t, 3> coordinates;
+        static_assert(sizeof(coordinates) == sizeof(point));
+        std::memcpy(coordinates.data(), &point, sizeof(coordinates));
         auto& entry = entries_[(cell ^ view.salt_) & (entries_.size() - 1)];
         if (entry.epoch == view.epoch_ && entry.identity == view.identity_ && entry.coordinates == coordinates)
         {
